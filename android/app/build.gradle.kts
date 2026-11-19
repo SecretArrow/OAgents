@@ -19,7 +19,11 @@ android {
         applicationId = "com.secretarrow.oagents"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // minSdk 24 (Android 7.0): the embedded Termux-built node binary is
+        // compiled "for Android 24, built by NDK r30" (interpreter
+        // /system/bin/linker64). Running it on API < 24 is unsupported and
+        // would dlopen-fail at exec time. This matches Termux's own floor.
+        minSdk = 24
         targetSdk = flutter.targetSdkVersion
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
         // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
@@ -71,22 +75,18 @@ android {
         }
     }
 
-    // v1.51.1 — libllamaserver.so is a llama.cpp EXECUTABLE (llama-server)
-    // renamed so PackageManager extracts it into nativeLibraryDir and marks
-    // it executable. Two packaging guards are REQUIRED for that trick:
-    //  * keepDebugSymbols — AGP's NDK strip pass cannot handle a PIE
-    //    executable masquerading as a shared library and corrupts it
-    //    (v1.51.0 shipped a 0-byte .so).
-    //  * useLegacyPackaging — with the AGP 8 default (uncompressed,
-    //    16 KB-aligned, non-extracted native libs) zipflinger's ELF
-    //    rewrite mangled the executable into a ~7 KB stub, and the file
-    //    would never be extracted to nativeLibraryDir at all, so
-    //    ProcessBuilder could not spawn it. Legacy packaging = extract at
-    //    install, real executable file on disk.
+    // useLegacyPackaging = true: native libs shipped under jniLibs/ (if any
+    // are added later) are EXTRACTED from the APK at install time into
+    // nativeLibraryDir and kept as real files on disk, so a ProcessBuilder
+    // could exec them. The Termux-built node-<abi> binary is NOT shipped
+    // here — it lives in assets/toolbox/toolbox.tar.gz and is extracted to
+    // filesDir/toolbox/bin/ at runtime by OpencodeRuntimeBridge — but this
+    // flag is kept on so any future jniLibs binary (e.g. a libnode.so JNI
+    // fallback) behaves predictably. With the AGP 8 default (uncompressed,
+    // 16 KB-aligned, non-extracted) zipflinger rewrites ELFs and a binary
+    // would never land on disk as an executable.
     packaging {
         jniLibs {
-            keepDebugSymbols.add("**/libllamaserver.so")
-            keepDebugSymbols.add("libllamaserver.so")
             useLegacyPackaging = true
         }
     }

@@ -40,28 +40,28 @@ jobs:
           name: oagents-toolbox
           path: oagents-toolbox
 
-      - name: Stage embedded toolbox assets + jniLibs
+      - name: Stage embedded toolbox assets
         # The bundle workflow stages:
-        #   oagents-toolbox/assets/toolbox/toolbox.tar.gz  (full Node toolbox)
+        #   oagents-toolbox/assets/toolbox/toolbox.tar.gz  (full Node toolbox:
+        #     opencode bundle + curated node_modules + per-ABI node-<abi>
+        #     binaries + per-ABI companion .so libs under lib/<abi>/ +
+        #     npm/npx shims + modules.json + version.txt)
         #   oagents-toolbox/assets/toolbox/version.txt     (read by Dart pre-start)
         #   oagents-toolbox/assets/toolbox/modules.json    (read by Dart pre-start)
-        #   oagents-toolbox/jniLibs/<abi>/libnode.so       (NodeJS Mobile, optional)
-        # These land under android/app/src/main/assets/toolbox/ + jniLibs/ so
-        # the Kotlin bridge + Dart toolbox_manifest can read them at runtime.
+        # These land under android/app/src/main/assets/toolbox/ so the Kotlin
+        # bridge (extracts the tar to filesDir/toolbox/ at first launch) and
+        # the Dart toolbox_manifest loader (reads modules.json/version.txt via
+        # rootBundle before the runtime starts) can both reach them. There is
+        # NO jniLibs/libnode.so path any more — node is a real Termux-built
+        # executable shipped inside the tar, exec'd from filesDir.
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p android/app/src/main/assets/toolbox
-          mkdir -p android/app/src/main/jniLibs
           cp oagents-toolbox/assets/toolbox/toolbox.tar.gz android/app/src/main/assets/toolbox/
           cp oagents-toolbox/assets/toolbox/version.txt    android/app/src/main/assets/toolbox/
           cp oagents-toolbox/assets/toolbox/modules.json   android/app/src/main/assets/toolbox/
-          if [ -d oagents-toolbox/jniLibs ]; then
-            cp -r oagents-toolbox/jniLibs/. android/app/src/main/jniLibs/
-            find android/app/src/main/jniLibs -name libnode.so -print
-          else
-            echo "::warning::oagents-toolbox artifact has no jniLibs; the release APK will not include libnode.so. Per-ABI node binaries inside toolbox.tar.gz (bin/node-<abi>) are the fallback runtime."
-          fi
+          ls -lh android/app/src/main/assets/toolbox/
           ls -lh android/app/src/main/assets/toolbox/
 
       - name: Set up Flutter (stable, SDK + pub + gradle cached)

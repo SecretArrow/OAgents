@@ -230,21 +230,30 @@ is **extract → select ABI → chmod → spawn with environment → poll /healt
    `rootBundle` via `lib/services/toolbox_manifest.dart`, so Settings →
    opencode can show the manifest + version **before** the runtime is
    started.
-2. **Select the Node binary for the device ABI** (first match wins):
-   - `nativeLibraryDir/libnode.so` — the NodeJS Mobile shared lib (preferred;
-     CI drops a per-ABI `libnode.so` into
-     `android/app/src/main/jniLibs/<abi>/`, mapped into `nativeLibraryDir`
-     at install time).
-   - `filesDir/toolbox/bin/node-<abi>` — a Termux-style static Node binary,
-     per-ABI, extracted from the tarball (`node-arm64-v8a`,
-     `node-armeabi-v7a`, `node-x86_64`).
-   - If neither is present for the running ABI, the bridge emits
-     `state = "failed"` with a message naming the missing ABI (e.g.
-     *"No Node runtime found for arm64-v8a. The CI bundle-opencode job must
-     drop libnode.so into android/app/src/main/jniLibs/arm64-v8a/ or
-     assets/toolbox/bin/node-arm64-v8a. Rebuild the APK after bundling."*)
-     and returns. The app still opens; Settings → opencode shows the
-     failure.
+2. **Select the Node binary for the device ABI.** The runtime is a real
+   Termux-built `node` executable (node 26, built against Android's Bionic
+   libc + NDK r30, "for Android 24"), not a shared library. It is selected
+   by `Build.SUPPORTED_ABIS` and exec'd directly from
+   `filesDir/toolbox/bin/node-<abi>` (`node-arm64-v8a` for AArch64,
+   `node-armeabi-v7a` for ARM EABI5, `node-x86_64` for x86_64). The
+   companion `.so` libs it dynamically links against
+   (`libc++_shared.so`, `libcares.so`, `libcrypto.so.3`, `libffi.so`,
+   `libicui18n.so.79`, `libicuuc.so.79`, `libsqlite3.so`, `libssl.so.3`,
+   `libz.so.1`, plus Bionic `libc.so`/`libdl.so`/`libm.so` which are
+   on-device) are staged per-ABI under `filesDir/toolbox/lib/<abi>/`, so
+   the spawn sets `LD_LIBRARY_PATH=filesDir/toolbox/lib/<device-abi>` and
+   Bionic's dynamic linker resolves them ahead of the binary's baked
+   RUNPATH (which points at Termux's prefix and is wrong outside Termux).
+   `filesDir` is on the app's private data partition and is exec-able on
+   every Android version (Termux itself relies on this). No `dlopen`, no
+   shared library — the `node` binary is exec'd as a real standalone
+   process. If the `node-<abi>` for the running ABI is
+   not present, the bridge emits `state = "failed"` with a message naming
+   the missing ABI (e.g. *"No Node runtime found for arm64-v8a. The CI
+   bundle-opencode job must stage the Termux node binary at
+   assets/toolbox/bin/node-arm64-v8a (inside toolbox.tar.gz). Rebuild the
+   APK after bundling."*) and returns. The app still opens; Settings →
+   opencode shows the failure.
 3. **Select agent-browser.** If `filesDir/toolbox/bin/agent-browser-<abi>`
    exists and is executable, the per-ABI Rust musl-static binary is used
    (musl-static binaries are self-contained and run on Android's Bionic
@@ -320,7 +329,7 @@ States (from `lib/services/opencode_runtime.dart`):
 | `starting` | `node opencode.bundle.js serve --port 4096` spawned inside `filesDir/toolbox/` with `PATH`/`NODE_PATH` env set, waiting for `GET /health` to answer on `embeddedOpencodeUrl`. |
 | `running` | opencode is up and serving on `embeddedOpencodeUrl`; chat is allowed. |
 | `stopped` | opencode process is not running (user stopped it, or the app was backgrounded and the foreground service was killed). |
-| `failed` | opencode failed to start (tarball extraction error, missing Node binary for the device ABI, libnode load failure, port conflict, `/health` timeout). The native bridge surfaces a human-readable `message` naming the missing piece (e.g. the missing ABI). |
+| `failed` | opencode failed to start (tarball extraction error, missing `node-<abi>` for the device ABI, `LD_LIBRARY_PATH` companion-lib resolution failure, port conflict, `/health` timeout). The native bridge surfaces a human-readable `message` naming the missing piece (e.g. the missing ABI). |
 
 `OpencodeRuntimeBridge.ensureReady()` (called at app boot from `main.dart`
 and before the first chat send of a session) brings the runtime to
@@ -411,11 +420,15 @@ opencode CLI. The toolbox is produced by
 [`bundle-opencode.yml`](../.github/workflows/bundle-opencode.yml) (the
 "Bundle opencode + Node toolbox" workflow), packaged as the
 `oagents-toolbox` workflow artifact, staged into
-`android/app/src/main/assets/toolbox/` + `android/app/src/main/jniLibs/` by
+`android/app/src/main/assets/toolbox/` (only `toolbox.tar.gz`,
+`version.txt`, `modules.json` — nothing is staged into `jniLibs/`) by
 `release.yml`, extracted to `filesDir/toolbox/` at first launch by
 [`OpencodeRuntimeBridge.kt`](../android/app/src/main/kotlin/com/secretarrow/oagents/OpencodeRuntimeBridge.kt),
 and spawned as `node opencode.bundle.js serve --port 4096` under a per-ABI
-Node runtime. The Dart-side lifecycle is driven by
+Termux `node` executable (node 26, Bionic libc + NDK r30, "for Android 24")
+exec'd from `filesDir/toolbox/bin/node-<abi>` with
+`LD_LIBRARY_PATH=filesDir/toolbox/lib/<abi>`. The Dart-side lifecycle is
+driven by
 [`lib/services/opencode_runtime.dart`](../lib/services/opencode_runtime.dart);
 the manifest + version are read by
 [`lib/services/toolbox_manifest.dart`](../lib/services/toolbox_manifest.dart);
@@ -430,13 +443,24 @@ The tree extracted to `filesDir/toolbox/` from
 ```
 toolbox/
   bin/
-    node-<abi>            per-ABI Node.js binary (Termux static / NodeJS Mobile),
-                          selected at runtime for the device ABI
-                          (arm64-v8a / armeabi-v7a / x86_64).
+    node-<abi>            per-ABI Termux Node.js executable (node 26, Bionic
+                          libc + NDK r30, "for Android 24"), selected at
+                          runtime for the device ABI (arm64-v8a /
+                          armeabi-v7a / x86_64) and exec'd with
+                          LD_LIBRARY_PATH=toolbox/lib/<abi>.
+    npm / npx             shell shims that exec the per-ABI node with
+                          npm-cli.js / npx-cli.js (reading $OAGENTS_ABI to
+                          pick the right node binary).
     agent-browser-<abi>   per-ABI Rust musl-static agent-browser CLI
                           (optional; JS shim fallback bin/agent-browser-js).
     agent-browser-js      Node shim that delegates to the agent-browser npm pkg.
   lib/
+    <abi>/*.so*           per-ABI companion shared libs the Termux node
+                          binary links against (libc++_shared.so,
+                          libcares.so, libcrypto.so.3, libffi.so,
+                          libicui18n.so.79, libicuuc.so.79, libsqlite3.so,
+                          libssl.so.3, libz.so.1) staged for arm64-v8a /
+                          armeabi-v7a / x86_64.
     node_modules/         pre-installed packages the embedded opencode runtime
                           AND chat modules can require() with no per-script
                           install. Curated set (see below).
@@ -465,13 +489,14 @@ Already covered in detail in
 In summary, at `start()` the bridge does: **extract** `assets/toolbox/toolbox.tar.gz`
 → `filesDir/toolbox/` (idempotent on the bundled revision via the
 `.extracted-revision` marker) → **select ABI** for the Node binary
-(`nativeLibraryDir/libnode.so` preferred, else
-`toolbox/bin/node-<abi>`) → **select agent-browser** (`agent-browser-<abi>`
+(`Build.SUPPORTED_ABIS` → `toolbox/bin/node-<abi>`; companion libs at
+`toolbox/lib/<abi>`) → **select agent-browser** (`agent-browser-<abi>`
 if present + executable, else the JS shim) → **`chmod +x`** the picked
 binaries → **start the foreground service** → **spawn**
-`node opencode.bundle.js serve --port 4096` with `PATH`,
-`NODE_PATH`, `npm_config_prefix`, `HOME`, and
-`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` env set → **poll `/health`** (max ~25s)
+`node opencode.bundle.js serve --port 4096` (exec'd as a real process via
+ProcessBuilder with `LD_LIBRARY_PATH=filesDir/toolbox/lib/<device-abi>`,
+plus `PATH`, `NODE_PATH`, `npm_config_prefix`, `HOME`, and
+`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` env set) → **poll `/health`** (max ~25s)
 → emit `running` or `failed` with an actionable message.
 
 ### `modules.json` manifest contract
@@ -518,35 +543,47 @@ source of truth.
 `bundle-opencode.yml` produces the `oagents-toolbox` workflow artifact
 containing:
 
-- `assets/toolbox/toolbox.tar.gz` — the full toolbox tree (opencode bundle +
-  curated `node_modules` + `modules.json` + `version.txt` + the
-  `agent-browser-js` shim + any per-ABI `node-<abi>` / `agent-browser-<abi>`
-  binaries the best-effort fetch step pulled).
+- `assets/toolbox/toolbox.tar.gz` — the full toolbox tree: `bin/{node-<abi>
+  ×3, npm, npx, agent-browser-js, agent-browser-<abi>?}`,
+  `lib/{<abi>/*.so ×3, node_modules/(curated + opencode bundle +
+  package.json)}`, `modules.json`, `version.txt`.
 - `assets/toolbox/version.txt` + `assets/toolbox/modules.json` — also
   staged loose so Dart can read them via `rootBundle` before the runtime
   starts (see the manifest contract above).
-- `jniLibs/<abi>/libnode.so` — per-ABI NodeJS Mobile shared lib, when the
-  best-effort fetch succeeded.
 
 CI steps: bundle opencode via esbuild (entry
 `packages/opencode/src/index.ts` on the `dev` branch — an assumption; if
 `sst/opencode` moves it, update that one line in `bundle-opencode.yml`) →
 `npm install --omit=dev` the curated `package.json` (crypto + dev + browser
 deps) into `lib/node_modules`, with the native `secp256k1` overridden to
-`@noble/secp256k1` → write `modules.json` via a Node one-liner → best-effort
-fetch per-ABI Node binaries (`nodejs-mobile-builder`) and agent-browser
-binaries (`vercel-labs/agent-browser` musl-static) → assemble the tree →
+`@noble/secp256k1` → write `modules.json` via a Node one-liner → **"Fetch
+per-ABI Node.js + companion libs from Termux"** (a real, reproducible
+fetcher — see below) → fetch `agent-browser-<abi>` from
+`vercel-labs/agent-browser` musl-static → assemble the tree →
 `tar -czf toolbox.tar.gz` → stage + upload.
 
-The per-ABI binary fetches are **honestly best-effort**: there is no stable
-well-known URL, so a maintainer may need to drop `node-<abi>` / `libnode.so`
-/ `agent-browser-<abi>` into the staging dir manually before a release. The
-workflow documents each missing binary with a `::warning::` line.
+The "Fetch per-ABI Node.js + companion libs from Termux" step, per Android
+ABI (arm64-v8a→aarch64, armeabi-v7a→arm, x86_64→x86_64), downloads the
+Termux `Packages` index from
+`https://packages.termux.dev/apt/termux-main/dists/stable/main/binary-<arch>/Packages`,
+looks up each dep (`nodejs npm libc++ openssl c-ares libicu libsqlite zlib
+libffi libandroid-spawn libuv libnghttp2 brotli`) by exact `Package: <name>`
+line match (not regex — needed because of `libc++`), downloads the `.deb`,
+and `dpkg-deb -x` extracts it. It stages `nodejs`'s `usr/bin/node` →
+`bin/node-<abi>`, collects every `usr/lib/*.so*` from all deps →
+`lib/<abi>/`, and stages `npm`'s `usr/lib/node_modules/npm` → shared
+`lib/node_modules/npm` plus `bin/npm` + `bin/npx` shell shims that exec
+the per-ABI node with `npm-cli.js` / `npx-cli.js` (reading `$OAGENTS_ABI`
+to pick the right node binary). A "Verify node ELF arch matches target ABI"
+step then `readelf -h`'s each `node-<abi>` and greps the `Machine:` line
+for the expected substring (`AArch64` / `ARM` / `X86-64`), failing the
+build if the arch is wrong.
 
-`release.yml` downloads the `oagents-toolbox` artifact, stages it into
-`android/app/src/main/assets/toolbox/` and
-`android/app/src/main/jniLibs/`, then builds split-per-ABI signed APKs on
-`v*` tags.
+`release.yml` downloads the `oagents-toolbox` artifact, stages only
+`assets/toolbox/{toolbox.tar.gz, version.txt, modules.json}` into
+`android/app/src/main/assets/toolbox/` (nothing is staged into `jniLibs/`
+— the node runtime lives inside the tarball), then builds split-per-ABI
+signed APKs on `v*` tags.
 
 ### Playwright on Android
 
@@ -586,10 +623,15 @@ a no-op rather than a ~150 MB download that would fail to run anyway.
    (see above).
 2. `agent-browser` is per-ABI Rust musl-static when available, else the JS
    shim → routed to the WebView.
-3. Per-ABI Node binary + `libnode.so` are best-effort — a maintainer may
-   need to drop `node-<abi>` / `libnode.so` into the staging dir manually;
-   a build without the runtime reports `state=failed` naming the missing
-   ABI.
+3. APK size is meaningful (~150–250 MB) — three per-ABI Termux `node`
+   executables (~36–51 MB each) + companion `.so` libs + curated
+   `node_modules`. Acceptable for a GitHub Release APK (no Play Store 200
+   MB single-APK limit applies). The Termux fetch is reproducible
+   (exact `Package:` line match against the Termux `Packages` index +
+   `dpkg-deb -x` extraction) and an ELF arch check (`readelf -h` →
+   `Machine:` line) fails the build if a `node-<abi>` does not match its
+   target ABI, so a missing or wrong-arch runtime is caught at CI rather
+   than at first launch.
 4. Native crypto addons replaced with pure-JS — `secp256k1` (native) →
    `@noble/secp256k1` (pure JS); other native addons get the same treatment
    or are omitted.
@@ -597,8 +639,12 @@ a no-op rather than a ~150 MB download that would fail to run anyway.
    (`packages/opencode/src/index.ts` on the `dev` branch) is an assumption;
    if `sst/opencode` moves it, update that one line in `bundle-opencode.yml`.
 
-Both `assets/toolbox/` and `jniLibs/` are gitignored (see
-[`.gitignore`](../.gitignore)); a `jniLibs/.gitkeep` placeholder keeps the
-directory tracked so CI has a stable drop target. A build without these
-artifacts opens the app but reports `state = failed` in Settings → opencode
-with an actionable message naming the missing ABI.
+`assets/toolbox/` is gitignored (see [`.gitignore`](../.gitignore)). No
+`.so` is shipped in `jniLibs/` — `build.gradle.kts` keeps
+`useLegacyPackaging = true` so any future `jniLibs` binary behaves
+predictably, but the node runtime now lives inside
+`assets/toolbox/toolbox.tar.gz` (the per-ABI Termux `node` executables
++ companion `.so` libs + `npm`/`npx` shims + `agent-browser-<abi>`
+binaries). A build without the CI-staged tarball opens the app but
+reports `state = failed` in Settings → opencode with an actionable
+message naming the missing ABI.

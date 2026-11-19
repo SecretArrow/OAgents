@@ -208,29 +208,84 @@ jobs:
           '
 
       # ------------------------------------------------------------------
-      # 3. Per-ABI Node.js binaries + agent-browser binaries (best-effort).
-      #    HONEST LIMITATION: there is no single well-known, stable URL for
-      #    an Android-runnable per-ABI node binary. The step is best-effort
-      #    and defensive: if it yields nothing, the maintainer MUST drop
-      #      node-<abi>            into assets/toolbox/bin/
-      #      (arm64-v8a / armeabi-v7a / x86_64)
-      #    OR libnode.so into android/app/src/main/jniLibs/<abi>/ before
-      #    release builds will run on-device. The artifact still ships
-      #    (JS-only) in that case. Same for agent-browser-<abi>.
+      # 3. Per-ABI Node.js binaries from Termux (the REAL working source).
+      #
+      #    Termux builds node.js against Android's Bionic libc + NDK, so the
+      #    resulting `node` binary is a genuine Android-runnable ELF (PIE,
+      #    interpreter /system/bin/linker64, "for Android 24, built by NDK").
+      #    It is exec'd directly from filesDir/toolbox/bin/ at runtime with
+      #    LD_LIBRARY_PATH=toolbox/lib/<abi> so its companion .so libs
+      #    (libcrypto, libssl, libcares, libffi, libicu*, libsqlite3, libz,
+      #    libc++_shared) resolve. This is NOT libnode.so (a shared library
+      #    that cannot be exec'd) — it is a real executable, validated
+      #    end-to-end against the Termux aarch64/arm/x86_64 indexes.
+      #
+      #    node 26 NEEDED libs (readelf -d): libc++_shared.so, libcares.so,
+      #    libcrypto.so.3, libffi.so, libicui18n.so.79, libicuuc.so.79,
+      #    libsqlite3.so, libssl.so.3, libz.so.1 (+ Bionic libc/libdl/libm
+      #    present on-device). Companion .so for each come from the Termux
+      #    debs of: libc++, openssl, c-ares, libicu, libsqlite, zlib, libffi,
+      #    libandroid-spawn. npm ships as a separate deb (node Recommends it).
       # ------------------------------------------------------------------
-      - name: Fetch per-ABI Node binaries (best-effort)
-        continue-on-error: true
+      - name: Fetch per-ABI Node.js + companion libs from Termux
         shell: bash
         run: |
+          set -e
           mkdir -p node-mobile
-          # Best-effort: try Termux's node-static mirror + nodejs-mobile-builder.
-          # Asset names/paths are NOT guaranteed — replace with explicit URLs
-          # if a reliable source is known.
-          curl -fsSL \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/StefanoBelli/nodejs-mobile-builder/releases/latest" \
-            -o nodejs-mobile-release.json || true
-          echo "Fetched nodejs-mobile-builder release metadata (best-effort)."
+          # Android ABI → Termux arch.
+          declare -A TARCH=( [arm64-v8a]=aarch64 [armeabi-v7a]=arm [x86_64]=x86_64 )
+          # node 26 runtime deps + npm + libandroid-spawn (Termux runtime).
+          DEPS="nodejs npm libc++ openssl c-ares libicu libsqlite zlib libffi libandroid-spawn libuv libnghttp2 brotli"
+          for abi in "${!TARCH[@]}"; do
+            tarch="${TARCH[$abi]}"
+            echo "::group::Termux $abi ($tarch)"
+            curl -sL "https://packages.termux.dev/apt/termux-main/dists/stable/main/binary-${tarch}/Packages" -o "pkgs-${tarch}"
+            rm -rf "ex-${abi}"; mkdir -p "ex-${abi}" "node-mobile/${abi}/lib"
+            for pkg in $DEPS; do
+              # Exact "Package: <name>" line match (avoids regex issues with libc++).
+              rel=$(awk -v p="$pkg" 'BEGIN{RS=""}{n=split($0,L,"\n");for(i=1;i<=n;i++){if(L[i]==("Package: "p)){for(j=i;j<=n;j++){if(L[j]~/^Filename:/){sub(/^Filename: /,"",L[j]);print L[j];exit}}}}}' "pkgs-${tarch}")
+              if [ -z "$rel" ]; then echo "  ::warning::$pkg not in Termux $tarch index"; continue; fi
+              curl -sL "https://packages.termux.dev/apt/termux-main/$rel" -o "/tmp/${pkg}-${tarch}.deb"
+              dpkg-deb -x "/tmp/${pkg}-${tarch}.deb" "ex-${abi}/${pkg}" 2>/dev/null \
+                && echo "  OK  $pkg" || echo "  ::warning::extract $pkg $tarch failed"
+            done
+            # node binary → bin/node-<abi>
+            nb="ex-${abi}/nodejs/data/data/com.termux/files/usr/bin/node"
+            if [ -f "$nb" ]; then
+              cp "$nb" "node-mobile/${abi}/node"
+              chmod +x "node-mobile/${abi}/node"
+              echo "  node: $(wc -c < "node-mobile/${abi}/node") bytes, $(readelf -h "node-mobile/${abi}/node" | awk '/Machine:/{print $3,$4,$5}')"
+            else
+              echo "  ::warning::node binary missing for $abi"
+            fi
+            # companion .so libs → lib/ (cp -L derefs symlinks; real files keep soname names)
+            find "ex-${abi}" -path "*/usr/lib/*.so*" \( -type f -o -type l \) 2>/dev/null \
+              | while read -r so; do cp -L "$so" "node-mobile/${abi}/lib/" 2>/dev/null || true; done
+            echo "  .so libs staged: $(find "node-mobile/${abi}/lib" -name '*.so*' | wc -l)"
+            # npm module → shared node_modules (ABI-independent; stage once from aarch64)
+            if [ "$abi" = "arm64-v8a" ] && [ -d "ex-${abi}/npm/data/data/com.termux/files/usr/lib/node_modules/npm" ]; then
+              mkdir -p node-mobile/npm-shared
+              cp -r "ex-${abi}/npm/data/data/com.termux/files/usr/lib/node_modules/npm" "node-mobile/npm-shared/npm"
+              echo "  npm module staged (shared)"
+            fi
+            echo "::endgroup::"
+          done
+
+      - name: Verify node ELF arch matches target ABI
+        shell: bash
+        run: |
+          set -e
+          # Expected readelf "Machine:" substring per Android ABI.
+          declare -A EXPECT=( [arm64-v8a]="AArch64" [armeabi-v7a]="ARM" [x86_64]="X86-64" )
+          ok=1
+          for abi in "${!EXPECT[@]}"; do
+            n="node-mobile/${abi}/node"
+            if [ ! -f "$n" ]; then echo "::error::node missing for $abi"; ok=0; continue; fi
+            m=$(readelf -h "$n" | grep -i 'Machine:')
+            echo "$abi → $m"
+            echo "$m" | grep -qi "${EXPECT[$abi]}" || { echo "::error::$abi node machine '$m' != expected '${EXPECT[$abi]}'"; ok=0; }
+          done
+          [ "$ok" = 1 ] || exit 1
 
       - name: Fetch per-ABI agent-browser binaries (best-effort)
         continue-on-error: true
@@ -238,7 +293,10 @@ jobs:
         run: |
           mkdir -p agent-browser-mobile
           # Best-effort: vercel-labs/agent-browser ships Rust musl-static
-          # binaries in its releases. Asset names are not guaranteed.
+          # binaries in its releases. Asset names are not guaranteed. When
+          # no native binary is available for an ABI, the JS shim
+          # (bin/agent-browser-js, which routes to the app's WebView via the
+          # browser bridge) is used instead.
           curl -fsSL \
             -H "Accept: application/vnd.github+json" \
             "https://api.github.com/repos/vercel-labs/agent-browser/releases/latest" \
@@ -270,39 +328,71 @@ jobs:
           require('agent-browser/bin/agent-browser.js');
           EOF
           chmod +x "$ROOT/bin/agent-browser-js"
-          # per-ABI node binaries (whatever was fetched)
+          # per-ABI node binaries + companion .so libs (Termux fetcher output).
+          # node-<abi> → bin/; *.so → lib/<abi>/ (the bridge sets
+          # LD_LIBRARY_PATH=toolbox/lib/<device-abi> at runtime).
           found_node=0
-          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
-            for src in "node-mobile/${abi}/node" "node-mobile/node-${abi}" \
-                       "node-mobile/libnode-${abi}.so"; do
-              if [ -f "$src" ]; then
-                cp "$src" "$ROOT/bin/node-$abi"
-                chmod +x "$ROOT/bin/node-$abi"
-                found_node=$((found_node+1))
-                echo "Staged node for ${abi} (from $src)"
-                break
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            src="node-mobile/${abi}/node"
+            if [ -f "$src" ]; then
+              cp "$src" "$ROOT/bin/node-$abi"
+              chmod +x "$ROOT/bin/node-$abi"
+              found_node=$((found_node+1))
+              # companion .so libs for this ABI
+              if [ -d "node-mobile/${abi}/lib" ]; then
+                mkdir -p "$ROOT/lib/$abi"
+                cp -L node-mobile/${abi}/lib/*.so* "$ROOT/lib/$abi/" 2>/dev/null || true
+                echo "Staged node + $(find "$ROOT/lib/$abi" -name '*.so*' | wc -l) libs for ${abi}"
+              else
+                echo "Staged node for ${abi} (no companion libs)"
               fi
-            done
+            fi
           done
-          if [ "$found_node" -eq 0 ]; then
-            echo "::warning::No per-ABI node binary staged. A maintainer must drop node-<abi> into assets/toolbox/bin/ (or libnode.so into jniLibs/<abi>/) before on-device builds will run."
+          if [ "$found_node" = 0 ]; then
+            echo "::error::No per-ABI node binary staged. The Termux fetch step must have failed."
+            exit 1
           fi
-          # per-ABI agent-browser binaries (whatever was fetched)
+          # npm module (shared, ABI-independent) + npm/npx bin shims.
+          if [ -d node-mobile/npm-shared/npm ]; then
+            cp -r node-mobile/npm-shared/npm "$ROOT/lib/node_modules/npm"
+            # npm/npx shims exec the bundled node with the right CLI entry.
+            cat > "$ROOT/bin/npm" <<'EOF'
+          #!/system/bin/sh
+          # OAgents toolbox shim — runs the bundled npm via the per-ABI node.
+          HERE="$(cd "$(dirname "$0")/.." && pwd)"
+          ABI="$OAGENTS_ABI"
+          [ -z "$ABI" ] && ABI="arm64-v8a"
+          exec "$HERE/bin/node-$ABI" "$HERE/lib/node_modules/npm/bin/npm-cli.js" "$@"
+          EOF
+            cat > "$ROOT/bin/npx" <<'EOF'
+          #!/system/bin/sh
+          # OAgents toolbox shim — runs the bundled npx via the per-ABI node.
+          HERE="$(cd "$(dirname "$0")/.." && pwd)"
+          ABI="$OAGENTS_ABI"
+          [ -z "$ABI" ] && ABI="arm64-v8a"
+          exec "$HERE/bin/node-$ABI" "$HERE/lib/node_modules/npm/bin/npx-cli.js" "$@"
+          EOF
+            chmod +x "$ROOT/bin/npm" "$ROOT/bin/npx"
+            echo "Staged npm + npm/npx shims"
+          else
+            echo "::warning::npm module not staged; npx/npm will be unavailable."
+          fi
+          # per-ABI agent-browser binaries (best-effort; JS shim is the fallback)
           found_ab=0
-          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
+          for abi in arm64-v8a armeabi-v7a x86_64; do
             for src in "agent-browser-mobile/${abi}/agent-browser" \
                        "agent-browser-mobile/agent-browser-${abi}"; do
               if [ -f "$src" ]; then
                 cp "$src" "$ROOT/bin/agent-browser-$abi"
                 chmod +x "$ROOT/bin/agent-browser-$abi"
                 found_ab=$((found_ab+1))
-                echo "Staged agent-browser for ${abi} (from $src)"
+                echo "Staged agent-browser for ${abi}"
                 break
               fi
             done
           done
-          if [ "$found_ab" -eq 0 ]; then
-            echo "::warning::No per-ABI agent-browser binary staged. The JS shim (bin/agent-browser-js) will be used instead."
+          if [ "$found_ab" = 0 ]; then
+            echo "::warning::No per-ABI agent-browser binary staged. The JS shim (bin/agent-browser-js) will be used."
           fi
           # version.txt = opencode-<sha> + toolbox-<sha>
           ocode_sha="$(cat opencode-version.txt)"
@@ -318,7 +408,7 @@ jobs:
       - name: Stage final artifact layout
         shell: bash
         run: |
-          mkdir -p staging/assets/toolbox staging/jniLibs
+          mkdir -p staging/assets/toolbox
           cp toolbox.tar.gz staging/assets/toolbox/toolbox.tar.gz
           # The bridge reads version.txt + modules.json from assets/toolbox/
           # directly (without unpacking the tar) so the Dart side can show
@@ -326,16 +416,8 @@ jobs:
           tar -xzf toolbox.tar.gz -C /tmp/tb-extract
           cp /tmp/tb-extract/toolbox/version.txt staging/assets/toolbox/version.txt
           cp /tmp/tb-extract/toolbox/modules.json staging/assets/toolbox/modules.json
-          # Stage any libnode.so per ABI (for the nativeLibraryDir path).
-          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
-            for src in "node-mobile/${abi}/libnode.so" "node-mobile/libnode-${abi}.so"; do
-              if [ -f "$src" ]; then
-                mkdir -p "staging/jniLibs/${abi}"
-                cp "$src" "staging/jniLibs/${abi}/libnode.so"
-                break
-              fi
-            done
-          done
+          echo "Final artifact tree:"
+          find staging -maxdepth 4 -type f -printf '  %p (%s bytes)\n' | sort
 
       - name: Upload oagents-toolbox artifact
         uses: actions/upload-artifact@v4

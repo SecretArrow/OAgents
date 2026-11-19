@@ -17,9 +17,13 @@ browser packages + a CI-generated `modules.json` manifest + per-ABI Node.js
 and agent-browser binaries + `version.txt`) ships inside the APK at
 `assets/toolbox/toolbox.tar.gz`, is extracted to `filesDir/toolbox/` at
 first launch by the native Kotlin bridge `OpencodeRuntimeBridge.kt`, and is
-spawned under a per-ABI Node runtime (NodeJS Mobile shared lib
-`libnode.so` preferred, Termux static `node-<abi>` fallback). It serves the
-app sandbox only — no other app and no network host can reach it.
+spawned under a per-ABI Node runtime — a real Termux-built `node`
+executable (node 26, built against Android's Bionic libc + NDK r30, "for
+Android 24"), exec'd directly from `filesDir/toolbox/bin/node-<abi>` with
+`LD_LIBRARY_PATH=filesDir/toolbox/lib/<abi>` so Bionic's dynamic linker
+resolves its companion `.so` libs ahead of the binary's baked RUNPATH. It
+serves the app sandbox only — no other app and no network host can reach
+it.
 
 Localization ships for **English, Bahasa Indonesia, and Español**; this
 README is English for consistency, with section headings kept in English.
@@ -59,8 +63,10 @@ one decisive architectural change:
   preset editor, and the per-ABI llama.cpp build pipeline are all gone.
 - **Added in OAgents:** the opencode CLI as the **sole** AI backend,
   **embedded on-device** via a bundled Node.js toolbox — an esbuild-bundled
-  `opencode.bundle.js` running under a per-ABI Node runtime (NodeJS Mobile
-  shared lib preferred, Termux static `node-<abi>` fallback) plus a curated
+  `opencode.bundle.js` running under a per-ABI Termux-built `node`
+  executable (node 26, Bionic libc + NDK r30, "for Android 24"), exec'd
+  from `filesDir/toolbox/bin/node-<abi>` with
+  `LD_LIBRARY_PATH=filesDir/toolbox/lib/<abi>`, plus a curated
   `lib/node_modules` of crypto / developer / browser packages — extracted to
   `filesDir/toolbox/` by the Kotlin `OpencodeRuntimeBridge.kt` and served on
   a fixed loopback port. The toolbox is not just the opencode CLI; it is a
@@ -130,13 +136,24 @@ modules `require()` against.
 ```
 toolbox/
   bin/
-    node-<abi>            per-ABI Node.js binary (Termux static / NodeJS Mobile),
-                          selected at runtime for the device ABI
-                          (arm64-v8a / armeabi-v7a / x86_64).
+    node-<abi>            per-ABI Termux Node.js executable (node 26, Bionic
+                          libc + NDK r30, "for Android 24"), selected at
+                          runtime for the device ABI (arm64-v8a /
+                          armeabi-v7a / x86_64) and exec'd with
+                          LD_LIBRARY_PATH=toolbox/lib/<abi>.
+    npm / npx             shell shims that exec the per-ABI node with
+                          npm-cli.js / npx-cli.js (reading $OAGENTS_ABI to
+                          pick the right node binary).
     agent-browser-<abi>   per-ABI Rust musl-static agent-browser CLI
                           (optional; JS shim fallback bin/agent-browser-js).
     agent-browser-js      Node shim that delegates to the agent-browser npm pkg.
   lib/
+    <abi>/*.so*           per-ABI companion shared libs the Termux node
+                          binary links against (libc++_shared.so,
+                          libcares.so, libcrypto.so.3, libffi.so,
+                          libicui18n.so.79, libicuuc.so.79, libsqlite3.so,
+                          libssl.so.3, libz.so.1) staged for arm64-v8a /
+                          armeabi-v7a / x86_64.
     node_modules/         pre-installed packages the embedded opencode runtime
                           AND chat modules can require() with no per-script
                           install. Curated set (see below).
@@ -257,31 +274,46 @@ CI, under `.github/workflows/`:
   PRs from forks).
 - **`bundle-opencode.yml`** — the **"Bundle opencode + Node toolbox"**
   workflow. Produces the `oagents-toolbox` workflow artifact containing:
-  - `assets/toolbox/toolbox.tar.gz` — the full toolbox tree (the esbuild
-    `opencode.bundle.js` + the curated `lib/node_modules` of crypto / dev /
-    browser deps via `npm install --omit=dev` + the CI-generated
-    `modules.json` + `version.txt` + the `agent-browser-js` shim + any
-    per-ABI `node-<abi>` / `agent-browser-<abi>` binaries the best-effort
-    fetch step was able to pull).
+  - `assets/toolbox/toolbox.tar.gz` — the full toolbox tree: `bin/{node-<abi>
+    ×3, npm, npx, agent-browser-js, agent-browser-<abi>?}`,
+    `lib/{<abi>/*.so ×3, node_modules/(curated + opencode bundle +
+    package.json)}`, `modules.json`, `version.txt`. The esbuild
+    `opencode.bundle.js`, the curated `lib/node_modules` of crypto / dev /
+    browser deps via `npm install --omit=dev`, the CI-generated
+    `modules.json`, the `agent-browser-js` shim, the per-ABI `node-<abi>`
+    Termux executables + companion `.so` libs, and the `npm`/`npx` shims
+    are all packed into this one tarball.
   - `assets/toolbox/version.txt` and `assets/toolbox/modules.json` — also
     staged **loose** alongside the tarball, so Dart can read them through
     `rootBundle` (via `lib/services/toolbox_manifest.dart`) and Settings →
     opencode can show the manifest + version **without launching opencode**.
-  - `jniLibs/<abi>/libnode.so` — the per-ABI NodeJS Mobile shared lib, when
-    the best-effort fetch succeeded.
 
-  The per-ABI binary fetches (nodejs-mobile-builder for `node`/`libnode.so`,
-  vercel-labs/agent-browser musl-static for `agent-browser-<abi>`) are
-  **honestly best-effort**: there is no stable well-known URL, so a
-  maintainer may need to drop `node-<abi>` / `libnode.so` /
-  `agent-browser-<abi>` into the staging dir manually before a release. The
-  workflow records this with `::warning::` lines. The staged
-  `assets/toolbox/` and `jniLibs/` trees are gitignored and never committed.
+  The "Fetch per-ABI Node.js + companion libs from Termux" step is a real,
+  reproducible fetcher (not best-effort). For each Android ABI
+  (arm64-v8a→aarch64, armeabi-v7a→arm, x86_64→x86_64) it downloads the
+  Termux `Packages` index from
+  `https://packages.termux.dev/apt/termux-main/dists/stable/main/binary-<arch>/Packages`,
+  looks up each dep (`nodejs npm libc++ openssl c-ares libicu libsqlite
+  zlib libffi libandroid-spawn libuv libnghttp2 brotli`) by exact
+  `Package: <name>` line match (not regex — needed because of `libc++`),
+  downloads the `.deb`, and `dpkg-deb -x` extracts it. It stages
+  `nodejs`'s `usr/bin/node` → `bin/node-<abi>`, collects every
+  `usr/lib/*.so*` from all deps → `lib/<abi>/`, and stages `npm`'s
+  `usr/lib/node_modules/npm` → shared `lib/node_modules/npm` plus
+  `bin/npm` + `bin/npx` shell shims that exec the per-ABI node with
+  `npm-cli.js` / `npx-cli.js` (reading `$OAGENTS_ABI` to pick the right
+  node binary). A "Verify node ELF arch matches target ABI" step then
+  `readelf -h`'s each `node-<abi>` and greps the `Machine:` line for the
+  expected substring (`AArch64` / `ARM` / `X86-64`), failing the build if
+  the arch is wrong. The per-ABI `agent-browser-<abi>` Rust musl-static
+  binary is fetched separately from `vercel-labs/agent-browser`. The
+  staged `assets/toolbox/` tree is gitignored and never committed.
 - **`release.yml`** — on `v*` tags: downloads the `oagents-toolbox`
-  artifact, stages it into `android/app/src/main/assets/toolbox/` and
-  `android/app/src/main/jniLibs/`, then builds split-per-ABI signed APKs
-  (`arm64-v8a`, `armeabi-v7a`, `x86_64`) and uploads them to GitHub
-  Releases.
+  artifact, stages only `assets/toolbox/{toolbox.tar.gz, version.txt,
+  modules.json}` into `android/app/src/main/assets/toolbox/` (nothing is
+  staged into `jniLibs/` — the node runtime lives inside the tarball),
+  then builds split-per-ABI signed APKs (`arm64-v8a`, `armeabi-v7a`,
+  `x86_64`) and uploads them to GitHub Releases.
 - **`auto-fix.yml`** — on push to `main`: runs `dart fix --apply` +
   `dart format`, and auto-commits the result (`[skip ci]`) so lint drift
   never blocks a merge. Best-effort; unfixable lints do not fail the job.
@@ -291,9 +323,10 @@ CI, under `.github/workflows/`:
 
 To release: tag `v<version>` (e.g. `v1.0.0`) and push it — `release.yml`
 downloads the `oagents-toolbox` artifact produced by `bundle-opencode.yml`,
-stages it under `android/app/src/main/assets/toolbox/` +
-`android/app/src/main/jniLibs/`, builds the APK, and publishes the GitHub
-Release.
+stages only `assets/toolbox/{toolbox.tar.gz, version.txt, modules.json}`
+under `android/app/src/main/assets/toolbox/` (no `jniLibs/` staging — the
+per-ABI Termux `node` executables and companion libs ship inside the
+tarball), builds the APK, and publishes the GitHub Release.
 
 If you do want a local build (Flutter 3.47.x, Java 17):
 
@@ -302,10 +335,11 @@ flutter pub get
 flutter build apk --split-per-abi   # optional; CI is the default path
 ```
 
-Note that a local build without the CI-staged `assets/toolbox/toolbox.tar.gz`
-/ `libnode.so` artifacts will report `state=failed` in **Settings → opencode**
-with an actionable message naming the missing ABI — see
-[Honest limitations](#honest-limitations).
+Note that a local build without the CI-staged
+`assets/toolbox/toolbox.tar.gz` (which carries the per-ABI Termux `node`
+executables and companion `.so` libs) will report `state=failed` in
+**Settings → opencode** with an actionable message naming the missing ABI
+— see [Honest limitations](#honest-limitations).
 
 ---
 
@@ -357,11 +391,11 @@ network and no real opencode runtime.
   revoke it at the provider immediately. No amount of `git history rewriting`
   unsends a secret that has already been seen.
 - **CI-bundled artifacts are gitignored.** The whole toolbox tree under
-  `android/app/src/main/assets/toolbox/` (the `toolbox.tar.gz` tarball, the
-  loose `version.txt` + `modules.json`, and any per-ABI
-  `node-<abi>` / `agent-browser-<abi>` binaries) and
-  `android/app/src/main/jniLibs/` (the per-ABI `libnode.so` runtimes) are
-  produced by `bundle-opencode.yml` and never committed.
+  `android/app/src/main/assets/toolbox/` (the `toolbox.tar.gz` tarball,
+  which carries the per-ABI Termux `node` executables, their companion
+  `.so` libs, the `npm`/`npx` shims, and the `agent-browser-<abi>`
+  binaries, plus the loose `version.txt` + `modules.json`) is produced by
+  `bundle-opencode.yml` and never committed.
 
 See [`SECURITY.md`](SECURITY.md) for reporting.
 
@@ -391,25 +425,31 @@ Be aware of these before building or shipping:
    browser backend → routed to the app's embedded WebView.
 
 3. **The embedded Node toolbox artifacts are not in the repo.** The
-   `assets/toolbox/toolbox.tar.gz` tarball, the loose `version.txt` +
-   `modules.json`, the per-ABI `node-<abi>` / `agent-browser-<abi>` binaries,
-   and `jniLibs/<abi>/libnode.so` are produced by the `bundle-opencode.yml`
-   CI workflow and staged into `android/app/src/main/assets/toolbox/` and
-   `android/app/src/main/jniLibs/` at build time. Both paths are gitignored.
-   A build that has **not** run `bundle-opencode.yml` will open the app
-   fine, but **Settings → opencode** will report `state=failed` with an
-   actionable message naming the missing ABI (e.g. *"No Node runtime found
-   for arm64-v8a. The CI bundle-opencode job must drop libnode.so into
-   android/app/src/main/jniLibs/arm64-v8a/ or
-   assets/toolbox/bin/node-arm64-v8a. Rebuild the APK after bundling."*).
+   `assets/toolbox/toolbox.tar.gz` tarball (which carries the per-ABI
+   Termux `node` executables, their companion `.so` libs, the `npm`/`npx`
+   shims, and the `agent-browser-<abi>` binaries), the loose `version.txt`
+   + `modules.json`, and the curated `lib/node_modules` are all produced
+   by the `bundle-opencode.yml` CI workflow and staged into
+   `android/app/src/main/assets/toolbox/` at build time. That path is
+   gitignored. A build that has **not** run `bundle-opencode.yml` will open
+   the app fine, but **Settings → opencode** will report `state=failed`
+   with an actionable message naming the missing ABI (e.g. *"No Node
+   runtime found for arm64-v8a. The CI bundle-opencode job must stage the
+   Termux node binary at assets/toolbox/bin/node-arm64-v8a (inside
+   toolbox.tar.gz). Rebuild the APK after bundling."*).
 
-4. **Per-ABI Node binary + libnode.so are best-effort.** The CI fetch step
-   is defensive (no stable well-known URL); if it yields nothing, the
-   maintainer must drop `node-<abi>` into `assets/toolbox/bin/` (or
-   `libnode.so` into `jniLibs/<abi>/`) before release builds will run
-   on-device. A first build without the runtime reports `state=failed` in
-   Settings → opencode with an actionable message naming the missing ABI.
-   The workflow records each missing binary with a `::warning::` line.
+4. **APK size is meaningful (~150–250 MB).** The APK carries three
+   per-ABI Termux `node` executables (~36–51 MB each), their companion
+   `.so` libs (crypto / ICU / sqlite / …), and the curated
+   `lib/node_modules`. This is the cost of a fully self-contained
+   on-device Node + crypto + developer toolbox with zero runtime download;
+   acceptable for a GitHub Release APK (no Play Store 200 MB single-APK
+   limit applies), but expect a long initial install. The Termux fetch is
+   reproducible (exact `Package:` line match against the Termux `Packages`
+   index + `dpkg-deb -x` extraction) and an ELF arch check (`readelf -h`
+   → `Machine:` line) fails the build if a `node-<abi>` does not match its
+   target ABI, so a missing or wrong-arch runtime is caught at CI rather
+   than at first launch.
 
 5. **Native crypto addons replaced with pure-JS.** The native-addon
    `secp256k1` is overridden to `@noble/secp256k1` (pure JS) so the toolbox
@@ -462,7 +502,7 @@ OAgents/
 │   ├── OpencodeRuntimeBridge.kt       # platform channel + toolbox extract + Node spawn + foreground svc
 │   └── OAgentsForegroundService.kt    # keep-alive for the embedded opencode
 ├── android/app/src/main/assets/toolbox/   # CI-staged, gitignored (toolbox.tar.gz + loose version.txt/modules.json)
-├── android/app/src/main/jniLibs/          # CI-staged, gitignored (per-ABI libnode.so)
+├── android/app/src/main/jniLibs/          # empty (.gitkeep); no .so shipped — node runtime lives in toolbox.tar.gz
 ├── docs/
 │   ├── architecture.md                # HTTP + platform channel + toolbox + state machine
 │   └── modules/                       # module SDK reference (en + id)

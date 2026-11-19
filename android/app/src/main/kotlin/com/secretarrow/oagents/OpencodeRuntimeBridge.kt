@@ -7,8 +7,12 @@
  *
  *   toolbox/
  *     bin/
- *       node-<abi>            per-ABI Node.js binary (Termux static /
- *                            NodeJS Mobile) — selected at runtime.
+ *       node-<abi>            per-ABI Node.js binary built for Android
+ *                            (Termux — linked against Bionic libc), with
+ *                            its companion .so libs under lib/. Exec'd
+ *                            directly from filesDir (exec-able on every
+ *                            Android version). NOT libnode.so — that is a
+ *                            shared library and cannot be exec'd.
  *       agent-browser-<abi>  per-ABI Rust musl-static agent-browser CLI
  *                            (optional; JS fallback otherwise).
  *       npm, npx             CLI shims (ship with node under lib/node_modules/npm).
@@ -40,15 +44,18 @@
  *
  * At start(), the bridge:
  *   1. extracts toolbox.tar.gz → filesDir/toolbox/ (idempotent on revision),
- *   2. selects the node binary for the device ABI
- *      (nativeLibraryDir/libnode.so preferred, else bin/node-<abi>),
+ *   2. selects the node binary for the device ABI (bin/node-<abi> — a real
+ *      Termux-built executable; libnode.so is NOT used because it is a
+ *      shared library and cannot be exec'd),
  *   3. selects agent-browser (bin/agent-browser-<abi> if present + executable,
  *      else the JS shim bin/agent-browser-js),
  *   4. chmods the picked binaries +x,
  *   5. spawns `node opencode.bundle.js serve --port 4096` with
- *      PATH=toolbox/bin:$PATH, NODE_PATH=toolbox/lib/node_modules,
- *      npm_config_prefix=toolbox, HOME=filesDir — so opencode can
- *      `require('ethers')`, shell out to `agent-browser`, run `npx`, etc.,
+ *      PATH=toolbox/bin:$PATH, LD_LIBRARY_PATH=toolbox/lib/<abi> (so the
+ *      Termux node binary resolves its companion .so libs),
+ *      NODE_PATH=toolbox/lib/node_modules, npm_config_prefix=toolbox,
+ *      HOME=filesDir — so opencode can `require('ethers')`, shell out to
+ *      `agent-browser`, run `npx`, etc.,
  *   6. polls http://127.0.0.1:4096/health until it answers.
  *
  * Every method is defensive: nothing throws across the channel. If the
@@ -150,10 +157,10 @@ class OpencodeRuntimeBridge(private val context: Context) {
                 emit(statusMap(
                     "failed",
                     message = "No Node runtime found for ABI ${deviceAbi()}. The CI " +
-                        "bundle-opencode job must drop a per-ABI node binary into " +
-                        "assets/toolbox/bin/node-<abi> (arm64-v8a / armeabi-v7a / " +
-                        "x86_64) OR libnode.so into jniLibs/<abi>/. Rebuild the APK " +
-                        "after bundling.",
+                        "bundle-opencode job (Termux fetch step) must produce a " +
+                        "per-ABI node binary at assets/toolbox/bin/node-<abi> " +
+                        "(arm64-v8a / armeabi-v7a / x86_64) + companion .so libs " +
+                        "under lib/<abi>/. Re-run the workflow and rebuild the APK.",
                     revision = revision,
                 ))
                 return
@@ -178,6 +185,7 @@ class OpencodeRuntimeBridge(private val context: Context) {
 
             val binDir = File(workDir, "bin")
             val libDir = File(workDir, "lib")
+            val abi = deviceAbi()
             val pb = ProcessBuilder(
                 listOf(
                     nodeBin.absolutePath,
@@ -188,11 +196,22 @@ class OpencodeRuntimeBridge(private val context: Context) {
             val env = pb.environment()
             env["PORT"] = PORT.toString()
             env["OPENCODE_SERVE"] = "1"
+            // Tell the npm/npx shell shims which per-ABI node binary to exec.
+            env["OAGENTS_ABI"] = abi
             // Make the toolbox's bin/ (node, npm, npx, agent-browser) the
             // FIRST thing on PATH so opencode's child processes resolve
             // them ahead of any system binary.
             env["PATH"] = binDir.absolutePath + ":" +
                 (System.getenv("PATH") ?: "/system/bin:/system/xbin")
+            // LD_LIBRARY_PATH → per-ABI lib dir, so the Termux-built node-<abi>
+            // binary resolves its companion shared libs (libcrypto.so.3,
+            // libssl.so.3, libcares, libffi, libicui18n.so.79, libicuuc.so.79,
+            // libsqlite3.so, libz.so.1, libc++_shared.so) shipped under
+            // toolbox/lib/<abi>/. Bionic's dynamic linker honors
+            // LD_LIBRARY_PATH ahead of the binary's baked RUNPATH (which
+            // points at Termux's prefix and is wrong outside Termux), so the
+            // node binary runs standalone on a vanilla Android system.
+            env["LD_LIBRARY_PATH"] = File(libDir, abi).absolutePath
             // NODE_PATH lets `require('ethers')` etc. resolve against the
             // pre-installed node_modules without a per-script install.
             env["NODE_PATH"] = File(libDir, "node_modules").absolutePath
@@ -252,11 +271,18 @@ class OpencodeRuntimeBridge(private val context: Context) {
         else @Suppress("DEPRECATION") Build.CPU_ABI
 
     private fun resolveNodeBinary(workDir: File): File? {
-        // 1. NodeJS Mobile shared lib (jniLibs/libnode.so → nativeLibraryDir).
-        val nativeDir = context.applicationInfo.nativeLibraryDir
-        val soFile = File(nativeDir, "libnode.so")
-        if (soFile.exists()) return soFile
-        // 2. Per-ABI static node binary shipped in the toolbox.
+        // The Node runtime is a REAL executable shipped per-ABI in the
+        // toolbox (Termux-built node, linked against Android's Bionic libc
+        // + its companion .so libs under toolbox/lib). It is exec'd
+        // directly from filesDir — which is on the app's private data
+        // partition and therefore exec-able on every Android version
+        // (Termux itself relies on exactly this property).
+        //
+        // NOTE: nodejs-mobile's libnode.so is a shared LIBRARY, not a PIE
+        // executable, so it CANNOT be exec'd via ProcessBuilder. If you
+        // later want the in-process libnode.so path, wire nodejs-mobile-
+        // android's JNI helper (System.loadLibrary("node") + node::Start)
+        // instead — do NOT try to exec libnode.so.
         val abis = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP)
             Build.SUPPORTED_ABIS.toList() else listOf(@Suppress("DEPRECATION") Build.CPU_ABI)
         val binDir = File(workDir, "bin")
