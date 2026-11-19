@@ -1,0 +1,53 @@
+name: CI
+
+# Fast, cached quality gate: format, analyze, unit-test on every push/PR to main.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter (stable, SDK + pub + gradle cached)
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: stable
+          cache: true
+          cache-path-builder: true
+
+      - name: Cache pub-cache and .dart_tool
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            .dart_tool
+          key: ${{ runner.os }}-pub-darttool-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-darttool-
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Check formatting (fail if not formatted)
+        run: dart format --set-exit-if-changed lib/ test/ integration_test/
+
+      - name: Analyze (lint)
+        run: flutter analyze
+
+      - name: Run unit tests
+        # test/ ships an in-process mock opencode server; no real opencode needed.
+        run: flutter test

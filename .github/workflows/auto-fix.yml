@@ -1,0 +1,70 @@
+name: Auto-fix
+
+# On push to main ONLY: apply dart fix + format and commit the result back.
+# Best-effort: unfixable lints never fail this workflow.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  # Do not cancel an in-flight auto-fix on main; it may be mid-commit.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  auto-fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout (full history, CI token for push-back)
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.OAGENTS_CI_TOKEN }}
+          fetch-depth: 0
+
+      - name: Set up Flutter (stable, SDK + pub + gradle cached)
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: stable
+          cache: true
+          cache-path-builder: true
+
+      - name: Cache pub-cache and .dart_tool
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            .dart_tool
+          key: ${{ runner.os }}-pub-darttool-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-darttool-
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Apply dart fix (best-effort)
+        continue-on-error: true
+        run: dart fix --apply lib/ test/ integration_test/
+
+      - name: Format
+        # dart fix can leave code unformatted; normalize afterwards.
+        run: dart format lib/ test/ integration_test/
+
+      - name: Commit fixes (only if files changed)
+        # The commit message contains [skip ci] so this push does not re-trigger
+        # auto-fix (or any other) workflow. The push authenticates with the
+        # OAGENTS_CI_TOKEN configured on the checkout step above.
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: 'chore(auto-fix): apply dart fix + format [skip ci]'
+          file_pattern: lib/** test/** integration_test/**
+          commit_user_name: oagents-bot
+          commit_user_email: bot@secretarrow.oagents
+
+      - name: Best-effort analyze (never blocks)
+        # Unfixable lints must not fail the workflow; it exits 0 regardless.
+        continue-on-error: true
+        run: flutter analyze

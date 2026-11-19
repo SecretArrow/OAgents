@@ -1,0 +1,14 @@
+version: 2
+updates:
+  # Flutter / Dart pub dependencies (pubspec.yaml lives at the repo root).
+  - package-ecosystem: pub
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+  # GitHub Actions used by the workflows.
+  - package-ecosystem: github-actions
+    directory: /.github/workflows
+    schedule:
+      interval: weekly
+      day: monday

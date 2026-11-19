@@ -1,0 +1,48 @@
+name: E2E
+
+# Integration tests against an in-process mock opencode server (no external service).
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter (stable, SDK + pub + gradle cached)
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: stable
+          cache: true
+          cache-path-builder: true
+
+      - name: Cache pub-cache and .dart_tool
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            .dart_tool
+          key: ${{ runner.os }}-pub-darttool-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-darttool-
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Run integration tests
+        # integration_test/ starts a mock opencode server fixture inside the test
+        # process; no external service or real opencode runtime is required.
+        run: flutter test integration_test/

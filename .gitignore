@@ -1,0 +1,92 @@
+# NEVER commit secrets, tokens, keystores, or CI-bundled opencode artifacts.
+# The embedded opencode runtime (opencode.bundle.js, version.txt, libnode.so)
+# is produced by .github/workflows/bundle-opencode.yml at build time and is
+# intentionally NOT tracked — see README.md "Honest limitations".
+
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# Widget Preview related
+.widget_preview/
+
+# Embedded opencode runtime (libnode.so) — built per-ABI by CI
+# (.github/workflows/bundle-opencode.yml) and injected into
+# android/app/src/main/jniLibs/ at build time, never committed.
+# Same principle as the old llama.cpp runtimes: a per-ABI native runtime
+# is too large and too platform-specific to live in git.
+android/app/src/main/jniLibs/*
+# Keep the directory itself tracked so CI has a stable place to drop libnode.so.
+!android/app/src/main/jniLibs/.gitkeep
+
+# Embedded opencode bundle + version + package.json — produced by CI
+# (bundle-opencode.yml) into android/app/src/main/assets/opencode/, never
+# committed. Also covers a stray root-level staging of the bundle.
+android/app/src/main/assets/opencode/
+/opencode.bundle.js
+/version.txt
+
+# Secrets — NEVER commit
+.env
+.env.*
+*.env
+*.token
+*_token
+gh-token*
+*.pem
+*.key
+*.keystore
+*.jks
+keystore.properties
+key.properties
+android/key.properties
+android/app/keystore.jks
+android/app/debug.keystore
+# Base64-encoded keystore / secret blobs written by release.yml
+*-base64.txt
+secrets/
+.secrets/
+# Adapter local config (kept from the prior layout for safety)
+tool/opencode-adapter.config.json

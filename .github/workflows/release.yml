@@ -1,0 +1,142 @@
+name: Release
+
+# On tag v*: build a fresh opencode bundle, stage it into the Android app, build
+# signed split-per-ABI release APKs and publish them to a GitHub Release.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never cancel an in-flight release on a tag.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bundle:
+    # Build a fresh opencode bundle for this release via the reusable workflow.
+    # (Alternative would be to download the latest main-branch `opencode-bundle`
+    # artifact; building fresh guarantees the release matches current main.)
+    permissions:
+      contents: read
+    uses: ./.github/workflows/bundle-opencode.yml
+
+  release:
+    needs: bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout OAgents
+        uses: actions/checkout@v4
+
+      - name: Download opencode-bundle artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: opencode-bundle
+          path: opencode-bundle
+
+      - name: Stage embedded opencode assets + jniLibs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p android/app/src/main/assets/opencode
+          mkdir -p android/app/src/main/jniLibs
+          cp opencode-bundle/opencode.bundle.js android/app/src/main/assets/opencode/
+          cp opencode-bundle/version.txt android/app/src/main/assets/opencode/
+          cp opencode-bundle/package.json android/app/src/main/assets/opencode/
+          if [ -d opencode-bundle/jniLibs ]; then
+            cp -r opencode-bundle/jniLibs/. android/app/src/main/jniLibs/
+            find android/app/src/main/jniLibs -name libnode.so -print
+          else
+            echo "::warning::opencode-bundle artifact has no jniLibs; the release APK will not include libnode.so and opencode will not run on-device."
+          fi
+
+      - name: Set up Flutter (stable, SDK + pub + gradle cached)
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: stable
+          cache: true
+          cache-path-builder: true
+
+      - name: Cache pub-cache and .dart_tool
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            .dart_tool
+          key: ${{ runner.os }}-pub-darttool-${{ hashFiles('**/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-darttool-
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Decode signing keystore (optional)
+        id: keystore
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$GITHUB_WORKSPACE/oagents.keystore"
+            echo "have_keystore=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::ANDROID_KEYSTORE_BASE64 is not set; building an UNSIGNED release APK so the first release can still ship. Set ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD to ship signed releases."
+            echo "have_keystore=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Write key.properties (when keystore present)
+        # ASSUMPTION: android/app/build.gradle.kts follows the standard Flutter
+        # signing template (reads android/key.properties when present). If it does
+        # not, the post-build apksigner step below still signs the APKs.
+        if: steps.keystore.outputs.have_keystore == 'true'
+        shell: bash
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          cat > android/key.properties <<EOF
+          storePassword=$KEYSTORE_PASSWORD
+          keyAlias=$KEY_ALIAS
+          keyPassword=$KEY_PASSWORD
+          storeFile=$GITHUB_WORKSPACE/oagents.keystore
+          EOF
+
+      - name: Build release APKs (split per ABI)
+        run: flutter build apk --release --split-per-abi
+
+      - name: Sign APKs with apksigner (when keystore present)
+        if: steps.keystore.outputs.have_keystore == 'true'
+        shell: bash
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}}"
+          BUILD_TOOLS="$(ls -d "$SDK"/build-tools/* | sort -V | tail -1)"
+          for apk in build/app/outputs/flutter-apk/*.apk; do
+            echo "Signing $apk"
+            "$BUILD_TOOLS/apksigner" sign \
+              --ks "$GITHUB_WORKSPACE/oagents.keystore" \
+              --ks-pass "pass:$KEYSTORE_PASSWORD" \
+              --ks-key-alias "$KEY_ALIAS" \
+              --key-pass "pass:$KEY_PASSWORD" \
+              "$apk"
+            "$BUILD_TOOLS/apksigner" verify "$apk"
+          done
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: build/app/outputs/flutter-apk/*.apk
+          generate_release_notes: true
+          token: ${{ secrets.OAGENTS_CI_TOKEN }}
