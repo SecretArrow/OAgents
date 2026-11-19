@@ -90,3 +90,38 @@ class MemorySettingsRepository implements SettingsRepository {
   @override
   Future<void> save(AppSettings settings) async => _settings = settings;
 }
+
+/// Minimal secret store for skill config values.
+///
+/// NOTE: [SettingsRepository] / [PrefsSettingsRepository] deliberately store
+/// NO secrets (no SecretBox, no Keystore indirection — see the file header).
+/// skill_registry's v1.49.0 secret-config feature, however, references a
+/// SecretBox abstraction (imported here via `show SecretBox, FlutterSecretBox`
+/// in skill_registry.dart). To keep that feature compiling without pulling in
+/// a native Keystore dependency the rest of the app avoids, this provides a
+/// minimal in-process implementation: values live in a static Map shared by
+/// all [FlutterSecretBox] instances, so `const FlutterSecretBox()` (the
+/// registry's default) is valid + every instance sees the same store. Skill
+/// config secrets do NOT persist across app restarts — they are re-derived
+/// from each SKILL.md on load, so an in-process store is sufficient.
+abstract class SecretBox {
+  const SecretBox();
+  Future<String?> read(String key);
+  Future<void> write(String key, String value);
+  Future<void> delete(String key);
+}
+
+class FlutterSecretBox implements SecretBox {
+  const FlutterSecretBox();
+
+  static final Map<String, String> _store = <String, String>{};
+
+  @override
+  Future<String?> read(String key) async => _store[key];
+
+  @override
+  Future<void> write(String key, String value) async => _store[key] = value;
+
+  @override
+  Future<void> delete(String key) async => _store.remove(key);
+}

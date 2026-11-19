@@ -140,7 +140,7 @@ class _OpencodeSetupScreenState extends ConsumerState<OpencodeSetupScreen> {
               onChanged: (id) {
                 ref
                     .read(settingsProvider.notifier)
-                    .update((s) => s.copyWith(opencodeModel: id));
+                    .update(ref.read(settingsProvider).copyWith(opencodeModel: id));
               },
               theme: theme,
             ),
@@ -262,7 +262,9 @@ class _ModelPicker extends StatelessWidget {
             child: Text(m.name.isEmpty ? m.id : '${m.id} (${m.name})'),
           ),
       ],
-      onChanged: onChanged,
+      onChanged: (String? v) {
+        if (v != null) onChanged(v);
+      },
     );
     if (models.isEmpty) {
       return Column(
@@ -337,7 +339,8 @@ class _ToolboxCard extends StatelessWidget {
           child: Row(
             children: <Widget>[
               const SizedBox(
-                size: 16,
+                height: 16,
+                width: 16,
                 child: CircularProgressIndicator(strokeWidth: 2),
               ),
               const SizedBox(width: 12),

@@ -148,7 +148,7 @@ class _ModelPickerSheetState extends ConsumerState<ModelPickerSheet> {
     if (trimmed.isEmpty) return;
     ref
         .read(settingsProvider.notifier)
-        .update((s) => s.copyWith(opencodeModel: trimmed));
+        .update(ref.read(settingsProvider).copyWith(opencodeModel: trimmed));
     Navigator.of(context).pop();
   }
 

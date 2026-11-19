@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show HttpException, SocketException;
+import 'dart:isolate' show Isolate;
 
 import 'package:http/http.dart' as http;
 
