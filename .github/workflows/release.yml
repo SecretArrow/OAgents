@@ -116,7 +116,20 @@ jobs:
           storeFile=$GITHUB_WORKSPACE/oagents.keystore
           EOF
 
-      - name: Build release APKs (split per ABI)
+      - name: Build SIGNED release APKs (split per ABI)
+        # build.gradle.kts release signingConfig reads these env vars:
+        #   KEYSTORE_PATH, KEYSTORE_STORE_PASSWORD, KEYSTORE_KEY_PASSWORD,
+        #   KEYSTORE_ALIAS. ZAGENTS_REQUIRE_SIGNING=true makes the build FAIL
+        #   if signing is misconfigured (a debug-signed release is worse than
+        #   no release). The per-ABI APKs land in
+        #   build/app/outputs/flutter-apk/*-{arm64-v8a,armeabi-v7a,x86_64}-release.apk
+        #   already release-signed; the apksigner step below re-verifies.
+        env:
+          KEYSTORE_PATH: ${{ github.workspace }}/oagents.keystore
+          KEYSTORE_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEYSTORE_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEYSTORE_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ZAGENTS_REQUIRE_SIGNING: ${{ steps.keystore.outputs.have_keystore }}
         run: flutter build apk --release --split-per-abi
 
       - name: Sign APKs with apksigner (when keystore present)
@@ -147,4 +160,6 @@ jobs:
           tag_name: ${{ github.ref_name }}
           files: build/app/outputs/flutter-apk/*.apk
           generate_release_notes: true
-          token: ${{ secrets.OAGENTS_CI_TOKEN }}
+          # Uses the workflow's GITHUB_TOKEN (permissions: contents: write
+          # on this job). No extra secret needed.
+          token: ${{ secrets.GITHUB_TOKEN }}
