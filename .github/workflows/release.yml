@@ -89,7 +89,9 @@ jobs:
           ls -lh android/app/src/main/assets/toolbox/
 
       - name: Set up Flutter (stable, SDK + pub + gradle cached)
-        uses: subosito/flutter-action@v2
+        # v3 — v2's "stable" channel resolution is broken (errors with
+        # "Unable to determine Flutter version for channel: stable").
+        uses: subosito/flutter-action@v3
         with:
           flutter-version: stable
           cache: true
