@@ -417,6 +417,7 @@ jobs:
           # The bridge reads version.txt + modules.json from assets/toolbox/
           # directly (without unpacking the tar) so the Dart side can show
           # the manifest + version before the runtime is started.
+          mkdir -p /tmp/tb-extract
           tar -xzf toolbox.tar.gz -C /tmp/tb-extract
           cp /tmp/tb-extract/toolbox/version.txt staging/assets/toolbox/version.txt
           cp /tmp/tb-extract/toolbox/modules.json staging/assets/toolbox/modules.json

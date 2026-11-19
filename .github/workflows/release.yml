@@ -1,7 +1,17 @@
 name: Release
 
-# On tag v*: build a fresh opencode bundle, stage it into the Android app, build
-# signed split-per-ABI release APKs and publish them to a GitHub Release.
+# On tag v*: download the latest successful main-branch `oagents-toolbox`
+# artifact (produced by bundle-opencode.yml on every push to main — the
+# embedded Node + opencode toolbox is a build-time asset independent of the
+# app version), stage it into the Android app, build signed split-per-ABI
+# release APKs and publish them to a GitHub Release.
+#
+# Why download instead of a reusable-workflow call (`uses:
+# ./.github/workflows/bundle-opencode.yml`)? That call never fired on
+# tag-triggered runs in this repo (zero workflow_call-event runs were ever
+# created), so the release job was always skipped. Downloading the artifact
+# from the latest green main-branch bundle run is robust + faster (no
+# rebuild of the ~5-min opencode+node_modules+Termux bundle per release).
 on:
   push:
     tags:
@@ -16,28 +26,43 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  bundle:
-    # Build a fresh opencode bundle for this release via the reusable workflow.
-    # (Alternative would be to download the latest main-branch `opencode-bundle`
-    # artifact; building fresh guarantees the release matches current main.)
-    permissions:
-      contents: read
-    uses: ./.github/workflows/bundle-opencode.yml
-
   release:
-    needs: bundle
     runs-on: ubuntu-latest
     timeout-minutes: 40
     permissions:
-      contents: write
+      contents: write   # publish the GitHub Release + APK assets
+      actions: read     # query + download the bundle workflow's artifact
     steps:
       - name: Checkout OAgents
         uses: actions/checkout@v4
 
-      - name: Download oagents-toolbox artifact
+      - name: Find latest successful bundle run on main
+        # bundle-opencode.yml runs on every push to main and uploads the
+        # `oagents-toolbox` artifact. Pick the most recent SUCCESSFUL one so
+        # the release always uses a known-good toolbox. If none exists yet,
+        # fail loudly with a clear message.
+        id: bundle
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          RUN_ID=$(gh run list -R "${{ github.repository }}" \
+            -w "Bundle opencode + Node toolbox" -b main \
+            -s success -L 1 --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)
+          if [ -z "$RUN_ID" ]; then
+            echo "::error::No successful 'Bundle opencode + Node toolbox' run found on main. Push a commit to main first so the oagents-toolbox artifact is produced, then re-tag."
+            exit 1
+          fi
+          echo "Latest green bundle run: $RUN_ID"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Download oagents-toolbox artifact (from that bundle run)
         uses: actions/download-artifact@v4
         with:
           name: oagents-toolbox
+          run-id: ${{ steps.bundle.outputs.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           path: oagents-toolbox
 
       - name: Stage embedded toolbox assets
@@ -62,7 +87,6 @@ jobs:
           cp oagents-toolbox/assets/toolbox/version.txt    android/app/src/main/assets/toolbox/
           cp oagents-toolbox/assets/toolbox/modules.json   android/app/src/main/assets/toolbox/
           ls -lh android/app/src/main/assets/toolbox/
-          ls -lh android/app/src/main/assets/toolbox/
 
       - name: Set up Flutter (stable, SDK + pub + gradle cached)
         uses: subosito/flutter-action@v2
@@ -84,7 +108,7 @@ jobs:
       - name: Resolve dependencies
         run: flutter pub get
 
-      - name: Decode signing keystore (optional)
+      - name: Decode signing keystore
         id: keystore
         shell: bash
         env:
