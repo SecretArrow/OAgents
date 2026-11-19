@@ -123,7 +123,7 @@ class OpencodeRuntimeBridge(private val context: Context) {
                 }
             }
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, EVENTS)
-            .setStreamHandler(object : EventChannel.StreamHandler() {
+            .setStreamHandler(object : EventChannel.StreamHandler {
                 override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
                     sink = events
                     events?.success(status.get())
