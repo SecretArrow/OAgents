@@ -6,13 +6,20 @@
 [![Release](https://github.com/SecretArrow/OAgents/actions/workflows/release.yml/badge.svg)](https://github.com/SecretArrow/OAgents/actions/workflows/release.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](#license)
 
-OAgents is a Flutter Android app that bundles the [opencode](https://opencode.ai)
-CLI **inside its own process** and talks to it over a fixed loopback HTTP
-endpoint (`http://127.0.0.1:4096`). There is no remote opencode server to
-point at, no provider picker, no API-key drawer with ten entries, and no
-local llama.cpp runtime to cross-compile. The opencode binary — a
-Node-runnable JS bundle launched by a bundled NodeJS Mobile runtime — lives
-in the APK, starts on-device, and serves the app sandbox only.
+OAgents is a Flutter Android app that embeds a **complete Node.js toolbox
+inside its own APK** — not just the [opencode](https://opencode.ai) CLI —
+and drives opencode over a fixed loopback HTTP endpoint
+(`http://127.0.0.1:4096`). There is no remote opencode server to point at,
+no provider picker, no API-key drawer with ten entries, and no local
+llama.cpp runtime to cross-compile. The toolbox tree (an esbuild-bundled
+`opencode.bundle.js` + a curated `lib/node_modules` of crypto / developer /
+browser packages + a CI-generated `modules.json` manifest + per-ABI Node.js
+and agent-browser binaries + `version.txt`) ships inside the APK at
+`assets/toolbox/toolbox.tar.gz`, is extracted to `filesDir/toolbox/` at
+first launch by the native Kotlin bridge `OpencodeRuntimeBridge.kt`, and is
+spawned under a per-ABI Node runtime (NodeJS Mobile shared lib
+`libnode.so` preferred, Termux static `node-<abi>` fallback). It serves the
+app sandbox only — no other app and no network host can reach it.
 
 Localization ships for **English, Bahasa Indonesia, and Español**; this
 README is English for consistency, with section headings kept in English.
@@ -51,8 +58,14 @@ one decisive architectural change:
   model lists from each provider, the Ollama manage screen, the Node-based
   preset editor, and the per-ABI llama.cpp build pipeline are all gone.
 - **Added in OAgents:** the opencode CLI as the **sole** AI backend,
-  **embedded on-device** via a bundled NodeJS Mobile runtime + opencode JS
-  bundle, served on a fixed loopback port.
+  **embedded on-device** via a bundled Node.js toolbox — an esbuild-bundled
+  `opencode.bundle.js` running under a per-ABI Node runtime (NodeJS Mobile
+  shared lib preferred, Termux static `node-<abi>` fallback) plus a curated
+  `lib/node_modules` of crypto / developer / browser packages — extracted to
+  `filesDir/toolbox/` by the Kotlin `OpencodeRuntimeBridge.kt` and served on
+  a fixed loopback port. The toolbox is not just the opencode CLI; it is a
+  full on-device Node environment the chat modules and agent tools can
+  `require()` against with zero per-script install.
 
 Everything else from ZAgents — the chat UX, the agent loop, the browser, the
 scheduler, the module/plugin system, the security model — is kept and now
@@ -70,17 +83,20 @@ flowchart TD
     CLIENT["OpencodeClient<br/>(HTTP + SSE)<br/>lib/services/opencode_client.dart"]
     HTTP["http://127.0.0.1:4096<br/>(app sandbox loopback)"]
     BRIDGE["OpencodeRuntimeBridge<br/>(Kotlin platform channel)<br/>android/.../OpencodeRuntimeBridge.kt"]
-    NODE["NodeJS Mobile + opencode.bundle.js<br/>(foreground service)"]
-    OPC["opencode runtime<br/>(auth, models, MCP, agent tools)"]
+    TOOLBOX["Node toolbox<br/>filesDir/toolbox/<br/>(opencode.bundle.js + node_modules<br/>+ node/&lt;abi&gt; + agent-browser&lt;abi&gt;/-js)"]
+    SVC["OAgentsForegroundService<br/>(keep-alive + wake lock)"]
+    OPC["opencode runtime<br/>(auth, models, MCP, agent tools)<br/>node opencode.bundle.js serve --port 4096"]
 
     UI --> LOOP
     LOOP --> CFG --> CLIENT
     CLIENT -- "GET /health<br/>GET /models<br/>POST /chat/completions (SSE)" --> HTTP
-    HTTP --> NODE
+    HTTP --> OPC
     UI -. "start / stop / status" .-> BRIDGE
-    BRIDGE -- "spawn + keep-alive" --> NODE
+    BRIDGE -- "extract toolbox.tar.gz<br/>select ABI<br/>chmod +x<br/>spawn + env" --> TOOLBOX
+    BRIDGE -- "start / stop" --> SVC
+    SVC -- "keep-alive" --> OPC
     BRIDGE -- "status events" .-> UI
-    NODE -- "require('./opencode.bundle.js')" --> OPC
+    TOOLBOX -- "node opencode.bundle.js serve<br/>NODE_PATH=toolbox/lib/node_modules<br/>PATH=toolbox/bin:$PATH" --> OPC
 ```
 
 Data flow for a chat turn:
@@ -94,9 +110,60 @@ Data flow for a chat turn:
    stream — assistant text deltas, tool-call deltas, a final usage chunk,
    and `[DONE]`.
 4. On the other side of the loopback socket sits the opencode process,
-   spawned by the Kotlin `OpencodeRuntimeBridge` running a bundled
-   `opencode.bundle.js` under a bundled NodeJS Mobile runtime, kept alive by
-   an Android foreground service.
+   spawned by the Kotlin `OpencodeRuntimeBridge` as
+   `node opencode.bundle.js serve --port 4096` inside the extracted
+   `filesDir/toolbox/` tree, under a per-ABI Node runtime, kept alive by an
+   Android foreground service. `NODE_PATH=toolbox/lib/node_modules` is set
+   in the spawn env so every curated package (`ethers`, `web3`, `viem`,
+   `playwright-core`, …) resolves without per-script install.
+
+---
+
+## Bundled Node toolbox
+
+OAgents ships a **full Node.js toolbox** inside the APK, not just the
+opencode CLI. The tree is extracted from `assets/toolbox/toolbox.tar.gz` to
+`filesDir/toolbox/` on first launch by `OpencodeRuntimeBridge.kt`, and is
+the on-device environment that both the opencode runtime and the chat
+modules `require()` against.
+
+```
+toolbox/
+  bin/
+    node-<abi>            per-ABI Node.js binary (Termux static / NodeJS Mobile),
+                          selected at runtime for the device ABI
+                          (arm64-v8a / armeabi-v7a / x86_64).
+    agent-browser-<abi>   per-ABI Rust musl-static agent-browser CLI
+                          (optional; JS shim fallback bin/agent-browser-js).
+    agent-browser-js      Node shim that delegates to the agent-browser npm pkg.
+  lib/
+    node_modules/         pre-installed packages the embedded opencode runtime
+                          AND chat modules can require() with no per-script
+                          install. Curated set (see below).
+    opencode.bundle.js    opencode CLI source bundled into one Node-runnable file.
+    package.json          opencode's package.json (for the require graph).
+  modules.json            CI-generated manifest of every bundled package +
+                         version, categorized (crypto / dev / browser). Read
+                         by lib/services/toolbox_manifest.dart and shown in
+                         Settings → opencode "Embedded Node toolbox" card.
+  version.txt            revision string: opencode-<sha>+toolbox-<sha>.
+```
+
+The curated `lib/node_modules` set, grouped by purpose:
+
+| Category | Packages |
+|---|---|
+| **Crypto / web3** | `ethers@6`, `web3@4`, `viem`, `@solana/web3.js`, `@solana/spl-token`, `bitcoinjs-lib`, `@noble/secp256k1`, `@noble/ed25519`, `@noble/hashes`, `@noble/curves`, `bip39`, `bip32`, `hdkey`, `crypto-js`, `bs58`, `tweetnacl`. The native-addon `secp256k1` is overridden to the pure-JS `@noble/secp256k1` so the toolbox runs under any Android Node runtime without a toolchain. |
+| **Developer** | `typescript`, `esbuild`, `tsx`, `prettier`, `vitest`, `zx`, `commander`, `chalk`, `dotenv`, `axios`, `lodash`, `zod`, `date-fns`, `p-map`, `p-queue`, `node-fetch`. |
+| **Browser** | `agent-browser` (npm package + optional Rust binary), `playwright-core` (pure-JS API only — Chromium itself is NOT shipped, see [Honest limitations](#honest-limitations)). |
+
+The exact package list and versions are pinned in the CI workflow's
+curated `package.json` and reflected verbatim in `modules.json`. Settings →
+opencode reads that manifest via `lib/services/toolbox_manifest.dart` and
+shows it in the "Embedded Node toolbox" card **before** the runtime is
+started — the manifest and `version.txt` are staged loose in
+`assets/toolbox/` so Dart can read them through `rootBundle` without
+launching opencode.
 
 ---
 
@@ -188,14 +255,33 @@ CI, under `.github/workflows/`:
   **auto-fix** job that applies `dart fix --apply` + `dart format` and
   commits the cleaned tree back to `main` (only on push to `main`, never on
   PRs from forks).
-- **`bundle-opencode.yml`** — produces the **embedded runtime artifact**:
-  it bundles the opencode source into `opencode.bundle.js`, writes
-  `version.txt`, and drops a per-ABI `libnode.so` (NodeJS Mobile) into
-  `android/app/src/main/jniLibs/<abi>/`. These artifacts are staged into
-  `android/app/src/main/assets/opencode/` and `android/app/src/main/jniLibs/`
-  at build time — they are gitignored and never committed.
-- **`release.yml`** — on `v*` tags: builds split-per-ABI signed APKs
-  (`arm64-v8a`, `armeabi-v7a`, `x86_64`) and uploads them to GitHub Releases.
+- **`bundle-opencode.yml`** — the **"Bundle opencode + Node toolbox"**
+  workflow. Produces the `oagents-toolbox` workflow artifact containing:
+  - `assets/toolbox/toolbox.tar.gz` — the full toolbox tree (the esbuild
+    `opencode.bundle.js` + the curated `lib/node_modules` of crypto / dev /
+    browser deps via `npm install --omit=dev` + the CI-generated
+    `modules.json` + `version.txt` + the `agent-browser-js` shim + any
+    per-ABI `node-<abi>` / `agent-browser-<abi>` binaries the best-effort
+    fetch step was able to pull).
+  - `assets/toolbox/version.txt` and `assets/toolbox/modules.json` — also
+    staged **loose** alongside the tarball, so Dart can read them through
+    `rootBundle` (via `lib/services/toolbox_manifest.dart`) and Settings →
+    opencode can show the manifest + version **without launching opencode**.
+  - `jniLibs/<abi>/libnode.so` — the per-ABI NodeJS Mobile shared lib, when
+    the best-effort fetch succeeded.
+
+  The per-ABI binary fetches (nodejs-mobile-builder for `node`/`libnode.so`,
+  vercel-labs/agent-browser musl-static for `agent-browser-<abi>`) are
+  **honestly best-effort**: there is no stable well-known URL, so a
+  maintainer may need to drop `node-<abi>` / `libnode.so` /
+  `agent-browser-<abi>` into the staging dir manually before a release. The
+  workflow records this with `::warning::` lines. The staged
+  `assets/toolbox/` and `jniLibs/` trees are gitignored and never committed.
+- **`release.yml`** — on `v*` tags: downloads the `oagents-toolbox`
+  artifact, stages it into `android/app/src/main/assets/toolbox/` and
+  `android/app/src/main/jniLibs/`, then builds split-per-ABI signed APKs
+  (`arm64-v8a`, `armeabi-v7a`, `x86_64`) and uploads them to GitHub
+  Releases.
 - **`auto-fix.yml`** — on push to `main`: runs `dart fix --apply` +
   `dart format`, and auto-commits the result (`[skip ci]`) so lint drift
   never blocks a merge. Best-effort; unfixable lints do not fail the job.
@@ -204,8 +290,10 @@ CI, under `.github/workflows/`:
   the in-process mock opencode server).
 
 To release: tag `v<version>` (e.g. `v1.0.0`) and push it — `release.yml`
-calls `bundle-opencode.yml` to stage the embedded runtime, builds the APK,
-and publishes the GitHub Release.
+downloads the `oagents-toolbox` artifact produced by `bundle-opencode.yml`,
+stages it under `android/app/src/main/assets/toolbox/` +
+`android/app/src/main/jniLibs/`, builds the APK, and publishes the GitHub
+Release.
 
 If you do want a local build (Flutter 3.47.x, Java 17):
 
@@ -214,9 +302,10 @@ flutter pub get
 flutter build apk --split-per-abi   # optional; CI is the default path
 ```
 
-Note that a local build without the CI-staged `opencode.bundle.js` /
-`libnode.so` artifacts will report `state=failed` in **Settings → opencode**
-with an actionable message — see [Honest limitations](#honest-limitations).
+Note that a local build without the CI-staged `assets/toolbox/toolbox.tar.gz`
+/ `libnode.so` artifacts will report `state=failed` in **Settings → opencode**
+with an actionable message naming the missing ABI — see
+[Honest limitations](#honest-limitations).
 
 ---
 
@@ -267,10 +356,12 @@ network and no real opencode runtime.
   ever pasted into a chat, an issue, or a commit, treat it as compromised:
   revoke it at the provider immediately. No amount of `git history rewriting`
   unsends a secret that has already been seen.
-- **CI-bundled artifacts are gitignored.** `opencode.bundle.js`,
-  `version.txt`, `android/app/src/main/assets/opencode/`, and
-  `android/app/src/main/jniLibs/` (the `libnode.so` runtimes) are produced
-  by `bundle-opencode.yml` and never committed.
+- **CI-bundled artifacts are gitignored.** The whole toolbox tree under
+  `android/app/src/main/assets/toolbox/` (the `toolbox.tar.gz` tarball, the
+  loose `version.txt` + `modules.json`, and any per-ABI
+  `node-<abi>` / `agent-browser-<abi>` binaries) and
+  `android/app/src/main/jniLibs/` (the per-ABI `libnode.so` runtimes) are
+  produced by `bundle-opencode.yml` and never committed.
 
 See [`SECURITY.md`](SECURITY.md) for reporting.
 
@@ -280,44 +371,67 @@ See [`SECURITY.md`](SECURITY.md) for reporting.
 
 Be aware of these before building or shipping:
 
-1. **The embedded runtime artifacts are not in the repo.** The
-   `opencode.bundle.js`, `version.txt`, and per-ABI `libnode.so` are
-   produced by the `bundle-opencode.yml` CI workflow and staged into
-   `android/app/src/main/assets/opencode/` and
+1. **Playwright Chromium is NOT shipped.** Playwright's bundled browsers
+   are built for glibc desktop Linux and cannot run on Android's Bionic
+   libc (and are ~150 MB+ each, which is unacceptable in an APK anyway).
+   The toolbox ships `playwright-core` (the pure-JS API) so
+   `require('playwright')` resolves and scripts using the API type-check,
+   but actual browser automation on-device is driven by the app's
+   **embedded WebView** (`flutter_inappwebview`, already a dependency)
+   through the agent's `browser_navigate` / `browser_click` /
+   `browser_type` / etc. tools — see `lib/services/browser_automation.dart`
+   and `live_browser_controller.dart`. `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1`
+   is set in the spawn env so Playwright never tries to fetch Chromium at
+   runtime.
+
+2. **agent-browser** ships as a per-ABI Rust musl-static binary when one is
+   available (musl-static binaries are self-contained, so they run on
+   Android's Bionic libc without a glibc dependency); otherwise the Node JS
+   fallback shim `bin/agent-browser-js` is used, which itself needs a
+   browser backend → routed to the app's embedded WebView.
+
+3. **The embedded Node toolbox artifacts are not in the repo.** The
+   `assets/toolbox/toolbox.tar.gz` tarball, the loose `version.txt` +
+   `modules.json`, the per-ABI `node-<abi>` / `agent-browser-<abi>` binaries,
+   and `jniLibs/<abi>/libnode.so` are produced by the `bundle-opencode.yml`
+   CI workflow and staged into `android/app/src/main/assets/toolbox/` and
    `android/app/src/main/jniLibs/` at build time. Both paths are gitignored.
    A build that has **not** run `bundle-opencode.yml` will open the app
    fine, but **Settings → opencode** will report `state=failed` with an
-   actionable message (e.g. "No Node runtime found. The CI bundle-opencode
-   job must drop libnode.so into android/app/src/main/jniLibs/<abi>/ or
-   assets/opencode/node-<abi>. Rebuild the APK after bundling.").
+   actionable message naming the missing ABI (e.g. *"No Node runtime found
+   for arm64-v8a. The CI bundle-opencode job must drop libnode.so into
+   android/app/src/main/jniLibs/arm64-v8a/ or
+   assets/toolbox/bin/node-arm64-v8a. Rebuild the APK after bundling."*).
 
-2. **`bundle-opencode.yml` is a CI assumption.** The Kotlin bridge
-   (`android/app/src/main/kotlin/com/secretarrow/oagents/OpencodeRuntimeBridge.kt`)
-   documents the exact bundled-asset layout it expects, and the exact
-   opencode entry path it spawns:
-   `node --eval "process.env.PORT='4096'; require('./opencode.bundle.js')"`
-   with env `PORT=4096` and `OPENCODE_SERVE=1`. The NodeJS Mobile runtime is
-   resolved as `nativeLibraryDir/libnode.so` (preferred, dropped by CI into
-   `jniLibs/<abi>/libnode.so`) or a fallback static `node-<abi>` binary
-   extracted from `assets/opencode/node-<abi>`. If neither is present the
-   bridge reports `state=failed` instead of crashing. How the CI fetches
-   the opencode source and the NodeJS Mobile build is documented in the
-   workflow; it is not vendored in this repo.
+4. **Per-ABI Node binary + libnode.so are best-effort.** The CI fetch step
+   is defensive (no stable well-known URL); if it yields nothing, the
+   maintainer must drop `node-<abi>` into `assets/toolbox/bin/` (or
+   `libnode.so` into `jniLibs/<abi>/`) before release builds will run
+   on-device. A first build without the runtime reports `state=failed` in
+   Settings → opencode with an actionable message naming the missing ABI.
+   The workflow records each missing binary with a `::warning::` line.
 
-3. **First-launch extraction.** On first launch (or when the bundled
-   revision in `version.txt` changes) the bridge extracts the bundle and
-   Node libs from APK assets to the app's private data dir. This is a
-   one-time cost per revision; subsequent launches skip it.
+5. **Native crypto addons replaced with pure-JS.** The native-addon
+   `secp256k1` is overridden to `@noble/secp256k1` (pure JS) so the toolbox
+   runs under any Android Node runtime without a native toolchain. Other
+   native-addon packages, if any, get the same treatment or are omitted
+   from the curated `lib/node_modules` set.
 
-4. **Foreground service.** The opencode process is kept alive by an Android
+6. **Foreground service.** The opencode process is kept alive by an Android
    foreground service (`OAgentsForegroundService`) with a persistent
    notification and wake lock. If the user or the OS kills that service
    while the app is backgrounded, the runtime transitions to `stopped` and
    must be restarted from Settings → opencode.
 
-5. **Loopback only.** `127.0.0.1:4096` is reachable only from inside the
+7. **Loopback only.** `127.0.0.1:4096` is reachable only from inside the
    app sandbox. No other app and no network host can reach the embedded
-   opencode. This is deliberate; do not try to expose it.
+   opencode toolbox. This is deliberate; do not try to expose it.
+
+8. **The exact opencode source entry path** bundled by CI
+   (`packages/opencode/src/index.ts` on the `dev` branch) is an assumption;
+   if `sst/opencode` moves it, update that one line in `bundle-opencode.yml`.
+   The CI workflow does not silently paper over a moved entry point — a
+   failed esbuild bundle fails the `bundle-opencode.yml` job loudly.
 
 ---
 
@@ -332,25 +446,29 @@ OAgents/
 │   ├── services/
 │   │   ├── opencode_client.dart       # the sole AI backend HTTP/SSE client
 │   │   ├── opencode_runtime.dart      # embedded runtime bridge facade (Dart side)
+│   │   ├── toolbox_manifest.dart      # loads modules.json + version.txt from assets
 │   │   ├── llm_client.dart            # stream / cancel / retry policy
 │   │   ├── agent_controller.dart      # agent loop, tool fan-out, todo plans
 │   │   ├── browser_automation.dart    # headless WebView, multi-context
+│   │   ├── live_browser_controller.dart  # WebView backend for agent browser tools
 │   │   ├── cron_scheduler.dart        # scheduled jobs
 │   │   ├── subagents.dart             # fan-of-subagents runner
 │   │   ├── module_runtime.dart        # JS module sandbox
 │   │   └── …                          # skills, fs, backup, app lock, ip guard, …
 │   ├── tools/tool_defs.dart           # agent tool schema
-│   ├── ui/screens/opencode_setup_screen.dart  # opencode state + model picker
+│   ├── ui/screens/opencode_setup_screen.dart  # opencode state + model picker + toolbox card
 │   └── l10n/                          # app_strings (en/id/es)
 ├── android/app/src/main/kotlin/com/secretarrow/oagents/
-│   ├── OpencodeRuntimeBridge.kt       # platform channel + Node spawn + foreground svc
+│   ├── OpencodeRuntimeBridge.kt       # platform channel + toolbox extract + Node spawn + foreground svc
 │   └── OAgentsForegroundService.kt    # keep-alive for the embedded opencode
+├── android/app/src/main/assets/toolbox/   # CI-staged, gitignored (toolbox.tar.gz + loose version.txt/modules.json)
+├── android/app/src/main/jniLibs/          # CI-staged, gitignored (per-ABI libnode.so)
 ├── docs/
-│   ├── architecture.md                # HTTP + platform channel + state machine
+│   ├── architecture.md                # HTTP + platform channel + toolbox + state machine
 │   └── modules/                       # module SDK reference (en + id)
 ├── integration_test/e2e_test.dart     # hermetic E2E with in-process doubles
 ├── test/                              # unit + widget tests, mock opencode server
-├── .github/workflows/                 # ci, e2e, auto-fix, bundle-opencode, release
+├── .github/workflows/                 # ci, e2e, auto-fix, bundle-opencode (oagents-toolbox artifact), release
 └── pubspec.yaml
 ```
 

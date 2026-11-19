@@ -8,6 +8,7 @@ import '../../l10n/app_strings.dart';
 import '../../models/models.dart';
 import '../../services/opencode_client.dart';
 import '../../services/opencode_runtime.dart';
+import '../../services/toolbox_manifest.dart';
 
 /// Replaces the old Providers + Ollama Manage screens.
 ///
@@ -32,6 +33,7 @@ class _OpencodeSetupScreenState extends ConsumerState<OpencodeSetupScreen> {
   List<OpencodeModel> _models = const <OpencodeModel>[];
   bool _loadingModels = false;
   String? _modelsError;
+  ToolboxManifest? _manifest;
 
   @override
   void initState() {
@@ -46,6 +48,13 @@ class _OpencodeSetupScreenState extends ConsumerState<OpencodeSetupScreen> {
       }
     });
     if (_status.isReady) _loadModels();
+    unawaited(_loadManifest());
+  }
+
+  Future<void> _loadManifest() async {
+    final m = await ToolboxManifestLoader.instance.load();
+    if (!mounted) return;
+    setState(() => _manifest = m);
   }
 
   @override
@@ -142,6 +151,8 @@ class _OpencodeSetupScreenState extends ConsumerState<OpencodeSetupScreen> {
           ),
           const SizedBox(height: 24),
           _AuthNote(theme: theme, strings: strings),
+          const SizedBox(height: 16),
+          _ToolboxCard(manifest: _manifest, theme: theme),
         ],
       ),
     );
@@ -302,6 +313,140 @@ class _AuthNote extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Shows the bundled Node toolbox: the opencode/toolbox revision, the Node
+/// runtime path, and the pre-installed crypto / dev / browser modules the
+/// embedded runtime can `require()`. Reads the CI-produced manifest via
+/// [ToolboxManifestLoader]; when the manifest is absent (build without the
+/// CI bundle staged), it shows an actionable hint instead of an empty list.
+class _ToolboxCard extends StatelessWidget {
+  const _ToolboxCard({required this.manifest, required this.theme});
+
+  final ToolboxManifest? manifest;
+  final ThemeData theme;
+
+  @override
+  Widget build(BuildContext context) {
+    if (manifest == null) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: <Widget>[
+              const SizedBox(
+                size: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+              const SizedBox(width: 12),
+              Text('Loading toolbox manifest…',
+                  style: theme.textTheme.bodyMedium),
+            ],
+          ),
+        ),
+      );
+    }
+    final m = manifest!;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Icon(Icons.extension_rounded,
+                    size: 20, color: theme.colorScheme.primary),
+                const SizedBox(width: 8),
+                Text('Embedded Node toolbox',
+                    style: theme.textTheme.titleSmall),
+              ],
+            ),
+            const SizedBox(height: 8),
+            if (!m.isPresent) ...<Widget>[
+              Text(
+                'No toolbox bundled in this build. The CI bundle-opencode job '
+                'produces toolbox.tar.gz (node + npm/npx + opencode + '
+                'crypto/dev modules + agent-browser + playwright-core); a '
+                'release build stages it into assets/toolbox/.',
+                style: theme.textTheme.bodyMedium,
+              ),
+            ] else ...<Widget>[
+              _metaRow('revision', m.version.isEmpty ? '—' : m.version),
+              _metaRow('node runtime', m.nodeRuntime),
+              _metaRow('modules', '${m.totalModules} packages'),
+              const SizedBox(height: 12),
+              _category('Crypto / web3', m.crypto),
+              const SizedBox(height: 10),
+              _category('Developer tooling', m.dev),
+              const SizedBox(height: 10),
+              _category('Browser', m.browser),
+              const SizedBox(height: 10),
+              Text(
+                'Browser automation on-device uses the app’s embedded WebView '
+                '(flutter_inappwebview), not Playwright’s Chromium (glibc-only, '
+                'not shipped). `require(\'playwright\')` resolves to '
+                'playwright-core for API compatibility; actual page work is '
+                'driven by the agent’s browser_* tools.',
+                style: theme.textTheme.bodySmall,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _metaRow(String k, String v) => Padding(
+    padding: const EdgeInsets.only(top: 2),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        SizedBox(
+          width: 110,
+          child: Text(k,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(fontWeight: FontWeight.w600)),
+        ),
+        Expanded(
+          child: Text(v, style: theme.textTheme.bodySmall),
+        ),
+      ],
+    ),
+  );
+
+  Widget _category(String label, List<BundledModule> modules) {
+    if (modules.isEmpty) {
+      return Text('$label: none bundled',
+          style: theme.textTheme.bodySmall
+              ?.copyWith(color: theme.colorScheme.outline));
+    }
+    return Wrap(
+      spacing: 6,
+      runSpacing: 4,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: <Widget>[
+        Text('$label:',
+            style: theme.textTheme.bodySmall
+                ?.copyWith(fontWeight: FontWeight.w600)),
+        for (final mod in modules)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHighest,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Text(
+              mod.version.isEmpty ? mod.name : '${mod.name}@${mod.version}',
+              style: theme.textTheme.labelSmall?.copyWith(
+                fontFamily: 'monospace',
+                fontSize: 10.5,
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

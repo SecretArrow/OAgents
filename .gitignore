@@ -52,19 +52,20 @@ app.*.map.json
 # Widget Preview related
 .widget_preview/
 
-# Embedded opencode runtime (libnode.so) — built per-ABI by CI
-# (.github/workflows/bundle-opencode.yml) and injected into
-# android/app/src/main/jniLibs/ at build time, never committed.
-# Same principle as the old llama.cpp runtimes: a per-ABI native runtime
-# is too large and too platform-specific to live in git.
+# Embedded Node toolbox (libnode.so + toolbox.tar.gz + per-ABI node/agent-browser
+# binaries) — produced per-ABI by CI (.github/workflows/bundle-opencode.yml) and
+# injected into android/app/src/main/jniLibs/ + android/app/src/main/assets/toolbox/
+# at release build time, never committed. Same principle as the old llama.cpp
+# runtimes: a per-ABI native runtime + the bundled node_modules tree are too
+# large and too platform-specific to live in git.
 android/app/src/main/jniLibs/*
 # Keep the directory itself tracked so CI has a stable place to drop libnode.so.
 !android/app/src/main/jniLibs/.gitkeep
 
-# Embedded opencode bundle + version + package.json — produced by CI
-# (bundle-opencode.yml) into android/app/src/main/assets/opencode/, never
+# Embedded toolbox assets (toolbox.tar.gz, version.txt, modules.json) — produced
+# by CI (bundle-opencode.yml) into android/app/src/main/assets/toolbox/, never
 # committed. Also covers a stray root-level staging of the bundle.
-android/app/src/main/assets/opencode/
+android/app/src/main/assets/toolbox/
 /opencode.bundle.js
 /version.txt
 
