@@ -88,6 +88,16 @@ jobs:
           cp oagents-toolbox/assets/toolbox/modules.json   android/app/src/main/assets/toolbox/
           ls -lh android/app/src/main/assets/toolbox/
 
+      - name: Set up Java 17 (LTS for Android/Gradle)
+        # The ubuntu-26.04 runner defaults to Java 25, which Gradle 8.x can't
+        # use ("Java 25.0.5 incompatible with Gradle 8.14.3; need 9.1.0+").
+        # Pin Java 17 LTS — AGP 8.x requires 17+, and Gradle 8.14.3 supports
+        # 17-24. Flutter/Gradle pick this up via JAVA_HOME.
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
       - name: Set up Flutter (stable, SDK + pub + gradle cached)
         # Use `channel: stable` (NOT `flutter-version: stable` — that input
         # expects a concrete version like 3.24.0 and misparses "stable" as a
