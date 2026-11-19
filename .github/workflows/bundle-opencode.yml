@@ -36,10 +36,14 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Node 20
+        # NOTE: no `cache: npm` — the OAgents repo root has no package-lock.json
+        # (the Flutter pubspec.lock is the only root lock file; the Node toolbox
+        # is generated at build time, and `npm ci` runs inside the checked-out
+        # sst/opencode tree which brings its own lock). `cache: npm` with no root
+        # lock file fails setup-node immediately, so we skip the npm cache.
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
 
       - name: Install esbuild globally
         run: npm install -g esbuild
