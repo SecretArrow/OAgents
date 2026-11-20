@@ -35,15 +35,21 @@ jobs:
       - name: Checkout OAgents
         uses: actions/checkout@v4
 
-      - name: Set up Node 20
+      - name: Set up Node 24
         # NOTE: no `cache: npm` — the OAgents repo root has no package-lock.json
         # (the Flutter pubspec.lock is the only root lock file; the Node toolbox
         # is generated at build time, and installs run inside the checked-out
         # sst/opencode tree which brings its own lock). `cache: npm` with no root
         # lock file fails setup-node immediately, so we skip the npm cache.
+        #
+        # Node 24, not 20: the bundled opencode CLI uses `await using`
+        # (explicit resource management) — Node 20 cannot even parse it
+        # (SyntaxError at import time). The on-device runtime is Termux's
+        # current nodejs (26), which supports it, so the bundle legitimately
+        # requires a modern Node and the smoke test must run on one too.
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       - name: Set up Bun
         # sst/opencode's dev branch is a Bun-workspaces repo (bun.lock, the
