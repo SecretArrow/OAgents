@@ -88,6 +88,9 @@ jobs:
           set -e
           cd opencode-src
           bun install --frozen-lockfile
+          # esbuild is not a root dependency of the opencode repo; add it
+          # as a dev dep for this ephemeral checkout's bundle step.
+          bun add -d esbuild@latest
           cat > bundle.config.mjs <<'EOF'
           import * as esbuild from 'esbuild'
           const externals = [
