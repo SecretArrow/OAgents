@@ -113,12 +113,17 @@ jobs:
           // `require('./impl/...')` calls esbuild cannot inline (they would
           // resolve against the OUTPUT file at runtime). Its ESM build
           // (lib/esm/main.js) bundles cleanly, so alias the bare specifier
-          // to that entry; resolution through bun's .bun layout needs the
-          // absolute path.
-          const jsoncEsm = path.resolve(
-            require.resolve('jsonc-parser/package.json').replace(/package\.json$/, ''),
-            'lib/esm/main.js',
+          // to that entry. jsonc-parser is a transitive dep (not hoisted to
+          // node_modules root in bun's isolated layout), so locate it in
+          // the .bun store directly.
+          const { readdirSync, existsSync } = await import('node:fs')
+          const storeDir = 'node_modules/.bun'
+          const jsoncHit = readdirSync(storeDir).find(
+            (d) => /^jsonc-parser@/.test(d) &&
+              existsSync(path.join(storeDir, d, 'node_modules/jsonc-parser/lib/esm/main.js')),
           )
+          if (!jsoncHit) throw new Error('jsonc-parser not found in the .bun store')
+          const jsoncEsm = path.resolve(storeDir, jsoncHit, 'node_modules/jsonc-parser/lib/esm/main.js')
           const banner = 'import { createRequire as __cr } from "node:module"; const require = __cr(import.meta.url);'
           await esbuild.build({
             entryPoints: ['packages/cli/src/index.ts'],
