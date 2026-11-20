@@ -186,11 +186,21 @@ class OpencodeRuntimeBridge(private val context: Context) {
             val binDir = File(workDir, "bin")
             val libDir = File(workDir, "lib")
             val abi = deviceAbi()
+            // Launch the launcher as a SCRIPT FILE (node <file>), NOT via
+            // --eval: when node runs an ESM module reached from an --eval
+            // context, the CJS global `__filename` leaks into the module
+            // scope with the value "[eval]" (as a plain script it is
+            // undefined). @effect/platform-node guards its createRequire
+            // with `typeof __filename === "string"` and would then pass
+            // "[eval]" to createRequire — ERR_INVALID_ARG_VALUE at boot.
+            // The launcher cjs file (lib/opencode.bundle.js) injects the
+            // serve argv under OPENCODE_SERVE=1 and dynamic-imports the
+            // real ESM bundle (lib/opencode.bundle.mjs).
+            val bundleLauncher = File(libDir, BUNDLE_NAME)
             val pb = ProcessBuilder(
                 listOf(
                     nodeBin.absolutePath,
-                    "--eval",
-                    "process.env.PORT='$PORT'; require('./$BUNDLE_NAME')",
+                    bundleLauncher.absolutePath,
                 ),
             ).directory(workDir).redirectErrorStream(true)
             val env = pb.environment()

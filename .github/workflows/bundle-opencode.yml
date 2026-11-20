@@ -99,14 +99,26 @@ jobs:
           bun add -d esbuild@latest
           cat > bundle.config.mjs <<'EOF'
           import * as esbuild from 'esbuild'
+          import { createRequire } from 'node:module'
+          import path from 'node:path'
+          const require = createRequire(import.meta.url)
           const externals = [
             'esbuild',
             'node-pty',
             'ffi-rs',
             '@ff-labs/fff-node',
-            'jsonc-parser',
             'virtual:opencode-app-assets',
           ]
+          // jsonc-parser's package main is the UMD build, whose lazy
+          // `require('./impl/...')` calls esbuild cannot inline (they would
+          // resolve against the OUTPUT file at runtime). Its ESM build
+          // (lib/esm/main.js) bundles cleanly, so alias the bare specifier
+          // to that entry; resolution through bun's .bun layout needs the
+          // absolute path.
+          const jsoncEsm = path.resolve(
+            require.resolve('jsonc-parser/package.json').replace(/package\.json$/, ''),
+            'lib/esm/main.js',
+          )
           const banner = 'import { createRequire as __cr } from "node:module"; const require = __cr(import.meta.url);'
           await esbuild.build({
             entryPoints: ['packages/cli/src/index.ts'],
@@ -115,31 +127,34 @@ jobs:
             format: 'esm',
             outfile: '../opencode.bundle.mjs',
             external: externals,
+            alias: { 'jsonc-parser': jsoncEsm },
             banner: { js: banner },
             logLevel: 'info',
           })
           EOF
           bun bundle.config.mjs
           test -s ../opencode.bundle.mjs
-          # The OAgents Kotlin bridge spawns:
-          #   node --eval "require('./opencode.bundle.js')"
-          # with OPENCODE_SERVE=1 and PORT set. The real bundle is ESM and
-          # dispatches on process.argv (no args -> interactive TUI), so we
-          # stage a small cjs launcher under that exact filename: it injects
-          # `serve --port $PORT` into argv when OPENCODE_SERVE=1 and then
-          # dynamic-imports the ESM bundle (cjs cannot statically import esm).
+          # The OAgents Kotlin bridge spawns the launcher as a script:
+          #   node lib/opencode.bundle.js
+          # with OPENCODE_SERVE=1 and PORT set (script mode, NOT --eval:
+          # modules reached from an --eval context see the CJS global
+          # __filename as "[eval]", which @effect/platform-node's
+          # createRequire guard then rejects — ERR_INVALID_ARG_VALUE).
+          # The real bundle is ESM and dispatches on process.argv (no args
+          # -> interactive TUI), so the cjs launcher injects the serve argv
+          # under OPENCODE_SERVE=1 and dynamic-imports the ESM bundle (cjs
+          # cannot statically import esm).
           cat > ../opencode.bundle.js <<'EOF'
           // OAgents embedded-opencode launcher (CommonJS).
           //
-          // Loaded by the Kotlin bridge via:
-          //   node --eval "require('./opencode.bundle.js')"
+          // Executed by the Kotlin bridge as a script:
+          //   node lib/opencode.bundle.js
           // with OPENCODE_SERVE=1 and PORT set. The real opencode CLI bundle
           // (opencode.bundle.mjs) is ESM and dispatches on process.argv — no
           // args means interactive TUI. This launcher injects the serve argv
-          // first so a bare require() boots the headless HTTP server on
-          // $PORT (4096), which the bridge polls via GET /health.
+          // first so running it boots the headless HTTP server on $PORT
+          // (4096), which the bridge polls via GET /health.
           if (process.env.OPENCODE_SERVE === '1') {
-            while (process.argv.length < 2) process.argv.push('opencode')
             if (!process.argv.includes('serve')) process.argv.push('serve')
             if (process.env.PORT && !process.argv.includes(process.env.PORT)) {
               process.argv.push('--port', process.env.PORT)
@@ -161,7 +176,7 @@ jobs:
           set -e
           cd opencode-src
           node ../opencode.bundle.mjs --version
-          OPENCODE_SERVE=1 PORT=4096 node --eval "require('../opencode.bundle.js')" &
+          OPENCODE_SERVE=1 PORT=4096 node ../opencode.bundle.js &
           SRV=$!
           ok=""
           for _ in $(seq 1 60); do
