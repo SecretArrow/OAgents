@@ -20,9 +20,13 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout (full history, CI token for push-back)
+        # GITHUB_TOKEN (job has contents: write) — pushes made with the
+        # default token do not re-trigger workflows, which pairs with the
+        # [skip ci] commit message to keep this loop-free. No PAT secret
+        # (OAGENTS_CI_TOKEN) needed.
         uses: actions/checkout@v4
         with:
-          token: ${{ secrets.OAGENTS_CI_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
       - name: Set up Flutter (stable, SDK + pub + gradle cached)
