@@ -221,6 +221,60 @@ jobs:
             echo "serve smoke test: /health answered"
           fi
 
+      - name: Smoke-test dynamic module install (npm install -g on demand)
+        # The opencode agent must be able to add Node modules at runtime
+        # that are NOT in the curated toolbox (the user's request: "opencode
+        # bisa menambah module yang dibutuhkan saat dibutuhkan"). This step
+        # proves the install-module.mjs helper + the bridge's npm_config_prefix
+        # + NODE_PATH + TMPDIR/npm_config_cache env actually produce a
+        # require()-able package on a clean prefix.
+        #
+        # Uses is-odd: ~1KB pure JS, no native addons, not pre-bundled.
+        shell: bash
+        run: |
+          set -e
+          # Re-create the on-device toolbox layout under a clean prefix so
+          # the test mirrors what the bridge sets up at first launch.
+          TB="$(mktemp -d)/toolbox"
+          mkdir -p "$TB/bin" "$TB/lib/node_modules" "$TB/cache/tmp" "$TB/cache/cache"
+          cp opencode.bundle.mjs "$TB/lib/"
+          cp .github/toolbox/install-module.mjs "$TB/lib/"
+          # Use the system npm (the on-device npm shim just execs node over
+          # lib/node_modules/npm/bin/npm-cli.js — same npm, same behavior).
+          ln -sf "$(command -v npm)" "$TB/bin/npm"
+          ln -sf "$(command -v node)" "$TB/bin/node"
+          cat > "$TB/lib/package.json" <<'PJ'
+          {"name":"oagents-toolbox","version":"1.0.0","private":true,"type":"module"}
+          PJ
+          export PATH="$TB/bin:$PATH"
+          export npm_config_prefix="$TB"
+          export NODE_PATH="$TB/lib/node_modules"
+          export npm_config_cache="$TB/cache/cache"
+          export npm_config_tmp="$TB/cache/tmp"
+          export TMPDIR="$TB/cache/tmp"
+          export HOME="$TB/cache"
+          # 1. install-module.mjs installs + verifies require() resolves.
+          out=$(node "$TB/lib/install-module.mjs" is-odd)
+          echo "$out"
+          echo "$out" | node -e "
+            const d = JSON.parse(require('fs').readFileSync(0,'utf8'));
+            if (!d.ok) { console.error('install-module FAILED:', d.error); process.exit(1); }
+            console.log('install-module OK:', d.name, d.version, '->', d.resolved);
+          "
+          # 2. require() from a DIFFERENT cwd (proves NODE_PATH propagation,
+          #    not a relative-fluke resolution).
+          cd "$TB/cache"
+          node -e "const r = require('is-odd'); if (!r(3) || r(2)) { console.error('require broken'); process.exit(1); } console.log('require(is-odd) from', process.cwd(), 'OK');"
+          # 3. native-addon package is REJECTED up front (no toolchain on-device).
+          rej=$(node "$TB/lib/install-module.mjs" bcrypt || true)
+          echo "$rej"
+          echo "$rej" | node -e "
+            const d = JSON.parse(require('fs').readFileSync(0,'utf8'));
+            if (d.ok) { console.error('native addon should have been rejected'); process.exit(1); }
+            console.log('native-addon rejection OK:', d.error.slice(0, 80));
+          "
+          echo "dynamic module install smoke: PASS"
+
       - name: Write opencode version
         shell: bash
         run: |
@@ -447,6 +501,12 @@ jobs:
           cp opencode.bundle.mjs "$ROOT/lib/opencode.bundle.mjs"
           cp photon_rs_bg.wasm "$ROOT/lib/photon_rs_bg.wasm"
           cp opencode-src/package.json "$ROOT/lib/package.json"
+          # Dynamic module installer — lets the opencode agent add a Node
+          # module on demand at runtime via `node lib/install-module.mjs
+          # <pkg>`. Runs npm install -g against the toolbox prefix (which
+          # the bridge points at lib/node_modules via NODE_PATH), verifies
+          # the package loads, and rejects native addons up front.
+          cp .github/toolbox/install-module.mjs "$ROOT/lib/install-module.mjs"
           # curated node_modules
           cp -r toolbox-staging/lib/node_modules/. "$ROOT/lib/node_modules/"
           # modules.json + version.txt at toolbox root (the bridge reads them)

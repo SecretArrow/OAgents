@@ -230,6 +230,20 @@ class OpencodeRuntimeBridge(private val context: Context) {
             env["npm_config_prefix"] = workDir.absolutePath
             env["HOME"] = context.filesDir.absolutePath
             env["NPM_CONFIG_HOME"] = context.filesDir.absolutePath
+            // Dynamic module install support — npm needs a writable tmp dir
+            // for staging downloads and a writable cache for the registry
+            // metadata + tarballs. Android has no /tmp, so point both at the
+            // app's cache dir (writable, not backed up, cleared on uninstall).
+            // With these + the prefix above, `npm install -g <pkg>` writes to
+            // $prefix/lib/node_modules/<pkg> (= NODE_PATH), and the toolbox's
+            // install-module.mjs helper exposes that to the opencode agent as
+            // a clean "add a module on demand" entry point.
+            val cacheRoot = context.cacheDir.absolutePath
+            File(cacheRoot, "npm-tmp").mkdirs()
+            File(cacheRoot, "npm-cache").mkdirs()
+            env["TMPDIR"] = File(cacheRoot, "npm-tmp").absolutePath
+            env["npm_config_tmp"] = File(cacheRoot, "npm-tmp").absolutePath
+            env["npm_config_cache"] = File(cacheRoot, "npm-cache").absolutePath
             // Playwright must NOT download Chromium on first use (it would
             // fetch a glibc binary that cannot run on Android). The app's
             // embedded WebView is the browser backend instead.
