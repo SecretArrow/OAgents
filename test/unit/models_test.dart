@@ -18,8 +18,7 @@ import 'package:oagents/models/models.dart';
 
 void main() {
   group('AppSettings defaults', () {
-    test('opencodeModel defaults to empty (let opencode pick its default)',
-        () {
+    test('opencodeModel defaults to empty (let opencode pick its default)', () {
       final AppSettings s = AppSettings();
       expect(s.opencodeModel, '');
     });
@@ -44,7 +43,9 @@ void main() {
   group('AppSettings copyWith', () {
     test('copyWith(opencodeModel: x) changes only the model id', () {
       final AppSettings base = AppSettings();
-      final AppSettings updated = base.copyWith(opencodeModel: 'opencode/glm-4.6');
+      final AppSettings updated = base.copyWith(
+        opencodeModel: 'opencode/glm-4.6',
+      );
       expect(updated.opencodeModel, 'opencode/glm-4.6');
       // Untouched fields stay at their defaults.
       expect(updated.agentMode, base.agentMode);
@@ -65,10 +66,10 @@ void main() {
   });
 
   group('AppSettings JSON', () {
-    test("toJson contains 'opencodeModel' and NOT the deleted legacy keys",
-        () {
-      final Map<String, dynamic> json =
-          AppSettings(opencodeModel: 'opencode/glm-4.6').toJson();
+    test("toJson contains 'opencodeModel' and NOT the deleted legacy keys", () {
+      final Map<String, dynamic> json = AppSettings(
+        opencodeModel: 'opencode/glm-4.6',
+      ).toJson();
 
       expect(json['opencodeModel'], 'opencode/glm-4.6');
       // The multi-provider schema is gone — none of these may survive.

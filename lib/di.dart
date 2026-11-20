@@ -115,8 +115,7 @@ final cronSchedulerProvider = Provider<CronSchedulerService>((ref) {
                 sessionId: sessionId,
                 browserContext: browserContext,
               ),
-      resolveConfig: () =>
-          resolveOpencodeLlmConfig(ref.read(settingsProvider)),
+      resolveConfig: () => resolveOpencodeLlmConfig(ref.read(settingsProvider)),
       // v1.50.0 — chat action: the cron fire injects the command into the
       // target chat session (or a fresh background chat) through the
       // live ChatController, exactly like a typed message.
@@ -386,33 +385,32 @@ final moduleRuntimeProvider = Provider<ModuleRuntime>(
         },
     agentCompose: (AgentComposeRequest request) async {
       final AppSettings settings = ref.read(settingsProvider);
-      final OpencodeRuntimeStatus runtime =
-          await ref.read(opencodeRuntimeProvider).status();
+      final OpencodeRuntimeStatus runtime = await ref
+          .read(opencodeRuntimeProvider)
+          .status();
       if (!runtime.isReady) {
         throw const AgentComposeException(
           'Embedded opencode runtime is not running. '
           'Open Settings → opencode to start it.',
         );
       }
-      return AgentComposer(llm: ref.read(llmClientProvider)).compose(
-        request: request,
-        config: resolveOpencodeLlmConfig(settings),
-      );
+      return AgentComposer(
+        llm: ref.read(llmClientProvider),
+      ).compose(request: request, config: resolveOpencodeLlmConfig(settings));
     },
     agentPolish: (AgentPolishRequest request) async {
       final AppSettings settings = ref.read(settingsProvider);
-      final OpencodeRuntimeStatus runtime =
-          await ref.read(opencodeRuntimeProvider).status();
+      final OpencodeRuntimeStatus runtime = await ref
+          .read(opencodeRuntimeProvider)
+          .status();
       if (!runtime.isReady) {
         throw const AgentPolishException(
           'Embedded opencode runtime is not running. '
           'Open Settings → opencode to start it.',
         );
       }
-      return AgentPolisher(llm: ref.read(llmClientProvider)).polish(
-        request: request,
-        config: resolveOpencodeLlmConfig(settings),
-      );
+      return AgentPolisher(llm: ref.read(llmClientProvider))
+          .polish(request: request, config: resolveOpencodeLlmConfig(settings));
     },
   ),
 );
@@ -527,8 +525,7 @@ final toolExecutorProvider = Provider<ToolExecutor>((ref) {
     moduleRuntime: ref.watch(moduleRuntimeProvider),
     subagents: SubagentRunner(
       llm: ref.watch(llmClientProvider),
-      resolveConfig: () =>
-          resolveOpencodeLlmConfig(ref.read(settingsProvider)),
+      resolveConfig: () => resolveOpencodeLlmConfig(ref.read(settingsProvider)),
       executeTool:
           (
             String name,
@@ -705,4 +702,3 @@ final updateCheckerProvider = Provider<UpdateChecker>((ref) => UpdateChecker());
 // llmServerProvider, downloadQueueProvider, ollamaRegistryClientProvider,
 // externalOllamaScannerProvider, localModelIoProvider, deviceRamBytesProvider,
 // benchmarkRunProvider and remoteCatalogProvider that lived here are gone.
-

@@ -22,10 +22,7 @@ void main() {
   });
 
   Widget wrap({AppSettings? settings}) => ProviderScope(
-    overrides: testOverrides(
-      dir: tempDir,
-      settings: settings ?? AppSettings(),
-    ),
+    overrides: testOverrides(dir: tempDir, settings: settings ?? AppSettings()),
     child: const OAgentsApp(),
   );
 
@@ -128,11 +125,7 @@ void main() {
   testWidgets('app bar language menu switches back to English', (
     WidgetTester tester,
   ) async {
-    await tester.pumpWidget(
-      wrap(
-        settings: AppSettings(languageCode: 'id'),
-      ),
-    );
+    await tester.pumpWidget(wrap(settings: AppSettings(languageCode: 'id')));
     await tester.pump();
 
     // Stored preference wins on startup: Indonesian.

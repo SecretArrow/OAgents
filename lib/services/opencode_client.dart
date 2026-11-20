@@ -130,8 +130,7 @@ class OpencodeClient {
         return const <OpencodeModel>[];
       }
       final dynamic decoded = jsonDecode(res.body);
-      final List<dynamic> data =
-          (decoded is Map && decoded['data'] is List)
+      final List<dynamic> data = (decoded is Map && decoded['data'] is List)
           ? decoded['data'] as List<dynamic>
           : (decoded is List ? decoded : const <dynamic>[]);
       return data
@@ -201,8 +200,8 @@ class OpencodeClient {
         // without it keeps the chat working (usage simply stays null).
         final String errorBody = await response.stream.bytesToString();
         if (errorBody.contains('stream_options')) {
-          final Map<String, dynamic> retryBody =
-              Map<String, dynamic>.of(body)..remove('stream_options');
+          final Map<String, dynamic> retryBody = Map<String, dynamic>.of(body)
+            ..remove('stream_options');
           final http.Request retry = http.Request('POST', uri)
             ..headers['Authorization'] = 'Bearer ${config.authToken}'
             ..headers['Content-Type'] = 'application/json'
@@ -320,8 +319,7 @@ class OpencodeClient {
         while (true) {
           final int newlineIndex = lineBuffer.indexOf('\n');
           if (newlineIndex < 0) break;
-          final String line =
-              lineBuffer.substring(0, newlineIndex).trim();
+          final String line = lineBuffer.substring(0, newlineIndex).trim();
           lineBuffer = lineBuffer.substring(newlineIndex + 1);
           if (line.isEmpty || line.startsWith(':')) continue;
           if (!line.startsWith('data:')) continue;
@@ -357,12 +355,12 @@ class OpencodeClient {
           if (toolCalls is List) {
             for (final raw in toolCalls) {
               if (raw is! Map<String, dynamic>) continue;
-              final int index =
-                  (raw['index'] as int?) ?? tools.length;
-              final _ToolAccumulator acc =
-                  tools.putIfAbsent(index, _ToolAccumulator.new);
-              if (raw['id'] is String &&
-                  (acc.id == null || acc.id!.isEmpty)) {
+              final int index = (raw['index'] as int?) ?? tools.length;
+              final _ToolAccumulator acc = tools.putIfAbsent(
+                index,
+                _ToolAccumulator.new,
+              );
+              if (raw['id'] is String && (acc.id == null || acc.id!.isEmpty)) {
                 acc.id = raw['id'] as String;
               }
               final function = raw['function'];
@@ -451,7 +449,9 @@ bool isRetryableOpencodeError(Object? error) {
   if (error is LlmException) {
     final int? code = error.statusCode;
     if (code != null) {
-      return code == 408 || code == 425 || code == 429 ||
+      return code == 408 ||
+          code == 425 ||
+          code == 429 ||
           (code >= 500 && code <= 599);
     }
     final String m = error.message.toLowerCase();

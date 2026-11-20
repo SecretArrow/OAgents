@@ -204,12 +204,15 @@ class OpencodeRuntimeBridge {
       }
     });
     try {
-      return await completer.future.timeout(timeout, onTimeout: () {
-        return const OpencodeRuntimeStatus(
-          state: OpencodeRuntimeState.failed,
-          message: 'opencode did not become ready within 30s',
-        );
-      });
+      return await completer.future.timeout(
+        timeout,
+        onTimeout: () {
+          return const OpencodeRuntimeStatus(
+            state: OpencodeRuntimeState.failed,
+            message: 'opencode did not become ready within 30s',
+          );
+        },
+      );
     } finally {
       await sub.cancel();
     }

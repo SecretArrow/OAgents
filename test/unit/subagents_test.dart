@@ -85,8 +85,11 @@ void main() {
         runner ??
         SubagentRunner(
           llm: llm ?? _TaskKeyedLlm(<String, List<AssistantTurn>>{}),
-          resolveConfig: () =>
-              const LlmConfig(serverUrl: 'https://test', authToken: 'k', model: 'm'),
+          resolveConfig: () => const LlmConfig(
+            serverUrl: 'https://test',
+            authToken: 'k',
+            model: 'm',
+          ),
           executeTool: (
             String name,
             Map<String, dynamic> args,

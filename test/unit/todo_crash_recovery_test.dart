@@ -154,7 +154,8 @@ void main() {
           AssistantTurn(content: 'ok lanjut'),
         ]),
         dir: tempDir,
-        settings: AppSettings(autoTitle: false,
+        settings: AppSettings(
+          autoTitle: false,
           // Keep the nudge/resume machinery out of this continuation; the
           // test asserts the RESTORED plan, not the resume loop.
           planFirst: false,
@@ -221,9 +222,7 @@ void main() {
           // planFirst off: this test asserts plan PERSISTENCE, not the
           // run-until-done nudge/resume loop (an incomplete plan with the
           // default settings intentionally keeps re-engaging the agent).
-          settings: AppSettings(autoTitle: false,
-            planFirst: false,
-          ),
+          settings: AppSettings(autoTitle: false, planFirst: false),
         ),
       );
       addTearDown(container.dispose);

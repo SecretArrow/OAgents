@@ -33,7 +33,10 @@ void main() {
   group('ping', () {
     test('returns true when the server is up', () async {
       expect(
-        await client.ping(serverUrl: server.base, timeout: const Duration(seconds: 2)),
+        await client.ping(
+          serverUrl: server.base,
+          timeout: const Duration(seconds: 2),
+        ),
         isTrue,
       );
     });
@@ -125,71 +128,73 @@ void main() {
       expect(turn.content, 'Hello from embedded opencode');
     });
 
-    test('throws LlmException with statusCode 401 when authToken is "deny"',
-        () async {
-      await expectLater(
-        client.chatStream(
-          config: LlmConfig(
-            serverUrl: server.base,
-            authToken: 'deny',
-            model: 'opencode/glm-4.6',
-          ),
-          messages: const <Map<String, dynamic>>[
-            <String, dynamic>{'role': 'user', 'content': 'hi'},
-          ],
-        ),
-        throwsA(
-          isA<LlmException>()
-              .having((LlmException e) => e.statusCode, 'statusCode', 401),
-        ),
-      );
-    });
-
     test(
-      'throws LlmAbortedException with the partial content streamed so far '
-      'when shouldAbort flips true mid-stream',
+      'throws LlmException with statusCode 401 when authToken is "deny"',
       () async {
-        // Separate the chunks in time so the client's per-read shouldAbort
-        // poll fires after the first chunk and before the second.
-        server.chunkDelay = const Duration(milliseconds: 60);
-
-        bool abort = false;
-        final List<String> seen = <String>[];
-        // Flip the abort flag as soon as the first text delta arrives.
-        void onDelta(String delta) {
-          seen.add(delta);
-          if (!abort) abort = true;
-        }
-
         await expectLater(
           client.chatStream(
             config: LlmConfig(
               serverUrl: server.base,
-              authToken: '',
+              authToken: 'deny',
               model: 'opencode/glm-4.6',
             ),
             messages: const <Map<String, dynamic>>[
               <String, dynamic>{'role': 'user', 'content': 'hi'},
             ],
-            onDelta: onDelta,
-            shouldAbort: () => abort,
           ),
           throwsA(
-            isA<LlmAbortedException>().having(
-              (LlmAbortedException e) => e.partialContent,
-              'partialContent',
-              allOf(
-                // The first chunk ("Hello ") was streamed before the abort.
-                contains('Hello'),
-                // The second chunk never made it: the abort fired first.
-                isNot(contains('from embedded')),
-              ),
+            isA<LlmException>().having(
+              (LlmException e) => e.statusCode,
+              'statusCode',
+              401,
             ),
           ),
         );
-        // Sanity: at least the first delta was observed.
-        expect(seen, isNotEmpty);
       },
     );
+
+    test('throws LlmAbortedException with the partial content streamed so far '
+        'when shouldAbort flips true mid-stream', () async {
+      // Separate the chunks in time so the client's per-read shouldAbort
+      // poll fires after the first chunk and before the second.
+      server.chunkDelay = const Duration(milliseconds: 60);
+
+      bool abort = false;
+      final List<String> seen = <String>[];
+      // Flip the abort flag as soon as the first text delta arrives.
+      void onDelta(String delta) {
+        seen.add(delta);
+        if (!abort) abort = true;
+      }
+
+      await expectLater(
+        client.chatStream(
+          config: LlmConfig(
+            serverUrl: server.base,
+            authToken: '',
+            model: 'opencode/glm-4.6',
+          ),
+          messages: const <Map<String, dynamic>>[
+            <String, dynamic>{'role': 'user', 'content': 'hi'},
+          ],
+          onDelta: onDelta,
+          shouldAbort: () => abort,
+        ),
+        throwsA(
+          isA<LlmAbortedException>().having(
+            (LlmAbortedException e) => e.partialContent,
+            'partialContent',
+            allOf(
+              // The first chunk ("Hello ") was streamed before the abort.
+              contains('Hello'),
+              // The second chunk never made it: the abort fired first.
+              isNot(contains('from embedded')),
+            ),
+          ),
+        ),
+      );
+      // Sanity: at least the first delta was observed.
+      expect(seen, isNotEmpty);
+    });
   });
 }

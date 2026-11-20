@@ -163,7 +163,8 @@ void main() {
       overrides: testOverrides(
         llm: scripted,
         dir: tempDir,
-        settings: AppSettings(autoTitle: false,
+        settings: AppSettings(
+          autoTitle: false,
           maxSteps: 2,
           runUntilDone: false,
         ),
@@ -320,7 +321,8 @@ void main() {
         llm: llm,
         dir: tempDir,
         // maxSteps=2 would normally cut the loop after two turns.
-        settings: AppSettings(autoTitle: false,
+        settings: AppSettings(
+          autoTitle: false,
           maxSteps: 2,
           runUntilDone: true,
         ),
@@ -353,7 +355,8 @@ void main() {
       overrides: testOverrides(
         llm: llm,
         dir: tempDir,
-        settings: AppSettings(autoTitle: false,
+        settings: AppSettings(
+          autoTitle: false,
           maxSteps: 2,
           runUntilDone: false,
         ),
@@ -530,9 +533,7 @@ void main() {
           llm: _ThrowingLlmClient(),
           dir: tempDir,
           // Auto-retry OFF: this test pins the RAW error path (no retries).
-          settings: AppSettings(autoTitle: false,
-            autoRetryEnabled: false,
-          ),
+          settings: AppSettings(autoTitle: false, autoRetryEnabled: false),
         ),
         backgroundRunServiceProvider.overrideWithValue(background),
       ],
@@ -634,9 +635,7 @@ void main() {
         ...testOverrides(
           llm: ScriptedLlmClient(<AssistantTurn>[AssistantTurn(content: 'ok')]),
           dir: tempDir,
-          settings: AppSettings(autoTitle: false,
-            runInBackground: false,
-          ),
+          settings: AppSettings(autoTitle: false, runInBackground: false),
         ),
         backgroundRunServiceProvider.overrideWithValue(background),
       ],
@@ -1067,7 +1066,8 @@ void main() {
         overrides: testOverrides(
           llm: llm,
           dir: tempDir,
-          settings: AppSettings(autoTitle: false,
+          settings: AppSettings(
+            autoTitle: false,
             planFirst: false,
             runUntilDone: false,
           ),
@@ -1666,9 +1666,7 @@ void main() {
               AssistantTurn(content: 'ok'),
             ]),
             dir: tempDir,
-            settings: AppSettings(autoTitle: false,
-              notifyOnDone: false,
-            ),
+            settings: AppSettings(autoTitle: false, notifyOnDone: false),
           ),
           backgroundRunServiceProvider.overrideWithValue(background),
           appInForegroundProvider.overrideWith((Ref ref) => false),

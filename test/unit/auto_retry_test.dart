@@ -110,7 +110,8 @@ AppSettings _retrySettings({
   bool planFirst = false,
   int maxSteps = defaultMaxSteps,
   bool runUntilDone = false,
-}) => AppSettings(autoTitle: false,
+}) => AppSettings(
+  autoTitle: false,
   autoRetryEnabled: enabled,
   autoRetryAttempts: attempts,
   autoRetryDelay: delay,
@@ -507,7 +508,8 @@ void main() {
 
   group('auto retry settings', () {
     test('round-trips through JSON and clamps out-of-range values', () {
-      final AppSettings base = AppSettings(autoRetryEnabled: false,
+      final AppSettings base = AppSettings(
+        autoRetryEnabled: false,
         autoRetryAttempts: 7,
         autoRetryDelay: 12,
       );
@@ -525,9 +527,7 @@ void main() {
       // Clamping on the way in — copyWith and fromJson (the constructor
       // stores raw values, the same contract as maxSteps).
       expect(
-        AppSettings()
-            .copyWith(autoRetryAttempts: 999)
-            .autoRetryAttempts,
+        AppSettings().copyWith(autoRetryAttempts: 999).autoRetryAttempts,
         maxAutoRetryAttempts,
       );
       expect(

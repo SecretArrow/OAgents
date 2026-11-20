@@ -37,8 +37,7 @@ Future<ProviderContainer> pumpApp(
       overrides: <Override>[
         ...testOverrides(
           dir: tempDir,
-          settings: AppSettings(ipSwitchWarnEnabled: warnEnabled,
-          ),
+          settings: AppSettings(ipSwitchWarnEnabled: warnEnabled),
           writeScreenshots: false,
         ),
         // Static history: the real chat store does disk IO that never

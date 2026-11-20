@@ -162,8 +162,7 @@ class _ModelPickerSheetState extends ConsumerState<ModelPickerSheet> {
     if (q.isNotEmpty) {
       out = out.where(
         (m) =>
-            m.id.toLowerCase().contains(q) ||
-            m.name.toLowerCase().contains(q),
+            m.id.toLowerCase().contains(q) || m.name.toLowerCase().contains(q),
       );
     }
     final List<OpencodeModel> list = out.toList()

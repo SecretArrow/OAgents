@@ -115,15 +115,17 @@ void main() {
       expect(loaded.maxSteps, defaultMaxSteps);
     });
 
-    test('create() builds a prefs-backed repo with no secretBox param',
-        () async {
-      SharedPreferences.setMockInitialValues(<String, Object>{});
-      final PrefsSettingsRepository repo =
-          await PrefsSettingsRepository.create();
-      expect(repo.load().opencodeModel, '');
-      await repo.save(AppSettings().copyWith(opencodeModel: 'created'));
-      expect(repo.load().opencodeModel, 'created');
-    });
+    test(
+      'create() builds a prefs-backed repo with no secretBox param',
+      () async {
+        SharedPreferences.setMockInitialValues(<String, Object>{});
+        final PrefsSettingsRepository repo =
+            await PrefsSettingsRepository.create();
+        expect(repo.load().opencodeModel, '');
+        await repo.save(AppSettings().copyWith(opencodeModel: 'created'));
+        expect(repo.load().opencodeModel, 'created');
+      },
+    );
 
     test('legacy migration: fromJson({"model":"legacy-model"}) yields '
         'opencodeModel == legacy-model', () {

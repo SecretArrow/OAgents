@@ -70,9 +70,9 @@ class _OpencodeSetupScreenState extends ConsumerState<OpencodeSetupScreen> {
       _modelsError = null;
     });
     try {
-      final models = await ref.read(opencodeClientProvider).listModels(
-        serverUrl: embeddedOpencodeUrl,
-      );
+      final models = await ref
+          .read(opencodeClientProvider)
+          .listModels(serverUrl: embeddedOpencodeUrl);
       if (!mounted) return;
       setState(() {
         _models = models;
@@ -92,9 +92,11 @@ class _OpencodeSetupScreenState extends ConsumerState<OpencodeSetupScreen> {
     if (_status.isReady) {
       await bridge.stop();
     } else {
-      setState(() => _status = const OpencodeRuntimeStatus(
-        state: OpencodeRuntimeState.starting,
-      ));
+      setState(
+        () => _status = const OpencodeRuntimeStatus(
+          state: OpencodeRuntimeState.starting,
+        ),
+      );
       await bridge.start();
     }
   }
@@ -140,7 +142,9 @@ class _OpencodeSetupScreenState extends ConsumerState<OpencodeSetupScreen> {
               onChanged: (id) {
                 ref
                     .read(settingsProvider.notifier)
-                    .update(ref.read(settingsProvider).copyWith(opencodeModel: id));
+                    .update(
+                      ref.read(settingsProvider).copyWith(opencodeModel: id),
+                    );
               },
               theme: theme,
             ),
@@ -187,39 +191,50 @@ class _StatusCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Row(children: <Widget>[
-              Icon(Icons.circle, color: color, size: 12),
-              const SizedBox(width: 8),
-              Text(status.state.name, style: theme.textTheme.titleMedium),
-            ]),
+            Row(
+              children: <Widget>[
+                Icon(Icons.circle, color: color, size: 12),
+                const SizedBox(width: 8),
+                Text(status.state.name, style: theme.textTheme.titleMedium),
+              ],
+            ),
             if (status.version.isNotEmpty) ...<Widget>[
               const SizedBox(height: 4),
-              Text('opencode ${status.version}',
-                  style: theme.textTheme.bodySmall),
+              Text(
+                'opencode ${status.version}',
+                style: theme.textTheme.bodySmall,
+              ),
             ],
             if (status.bundledRevision.isNotEmpty) ...<Widget>[
               const SizedBox(height: 2),
-              Text('bundle ${status.bundledRevision}',
-                  style: theme.textTheme.bodySmall),
+              Text(
+                'bundle ${status.bundledRevision}',
+                style: theme.textTheme.bodySmall,
+              ),
             ],
             if (status.message.isNotEmpty) ...<Widget>[
               const SizedBox(height: 8),
-              Text(status.message,
-                  style: theme.textTheme.bodyMedium
-                      ?.copyWith(color: theme.colorScheme.error)),
+              Text(
+                status.message,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.error,
+                ),
+              ),
             ],
             const SizedBox(height: 12),
-            Row(children: <Widget>[
-              FilledButton(
-                onPressed: onToggle,
-                child: Text(status.isReady ? 'Stop' : 'Start'),
-              ),
-              const SizedBox(width: 8),
-              OutlinedButton(
-                onPressed: status.isReady ? onRefreshModels : null,
-                child: const Text('Refresh models'),
-              ),
-            ]),
+            Row(
+              children: <Widget>[
+                FilledButton(
+                  onPressed: onToggle,
+                  child: Text(status.isReady ? 'Stop' : 'Start'),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton(
+                  onPressed: status.isReady ? onRefreshModels : null,
+                  child: const Text('Refresh models'),
+                ),
+              ],
+            ),
             const SizedBox(height: 8),
             Text(
               'Endpoint: $embeddedOpencodeUrl',
@@ -298,11 +313,17 @@ class _AuthNote extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Row(children: <Widget>[
-              Icon(Icons.info_outline, size: 20, color: theme.colorScheme.primary),
-              const SizedBox(width: 8),
-              Text('Provider auth', style: theme.textTheme.titleSmall),
-            ]),
+            Row(
+              children: <Widget>[
+                Icon(
+                  Icons.info_outline,
+                  size: 20,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Text('Provider auth', style: theme.textTheme.titleSmall),
+              ],
+            ),
             const SizedBox(height: 8),
             Text(
               'opencode talks to its own model providers (OpenAI, Anthropic, '
@@ -344,8 +365,10 @@ class _ToolboxCard extends StatelessWidget {
                 child: CircularProgressIndicator(strokeWidth: 2),
               ),
               const SizedBox(width: 12),
-              Text('Loading toolbox manifest…',
-                  style: theme.textTheme.bodyMedium),
+              Text(
+                'Loading toolbox manifest…',
+                style: theme.textTheme.bodyMedium,
+              ),
             ],
           ),
         ),
@@ -360,11 +383,16 @@ class _ToolboxCard extends StatelessWidget {
           children: <Widget>[
             Row(
               children: <Widget>[
-                Icon(Icons.extension_rounded,
-                    size: 20, color: theme.colorScheme.primary),
+                Icon(
+                  Icons.extension_rounded,
+                  size: 20,
+                  color: theme.colorScheme.primary,
+                ),
                 const SizedBox(width: 8),
-                Text('Embedded Node toolbox',
-                    style: theme.textTheme.titleSmall),
+                Text(
+                  'Embedded Node toolbox',
+                  style: theme.textTheme.titleSmall,
+                ),
               ],
             ),
             const SizedBox(height: 8),
@@ -409,31 +437,38 @@ class _ToolboxCard extends StatelessWidget {
       children: <Widget>[
         SizedBox(
           width: 110,
-          child: Text(k,
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(fontWeight: FontWeight.w600)),
+          child: Text(
+            k,
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          ),
         ),
-        Expanded(
-          child: Text(v, style: theme.textTheme.bodySmall),
-        ),
+        Expanded(child: Text(v, style: theme.textTheme.bodySmall)),
       ],
     ),
   );
 
   Widget _category(String label, List<BundledModule> modules) {
     if (modules.isEmpty) {
-      return Text('$label: none bundled',
-          style: theme.textTheme.bodySmall
-              ?.copyWith(color: theme.colorScheme.outline));
+      return Text(
+        '$label: none bundled',
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: theme.colorScheme.outline,
+        ),
+      );
     }
     return Wrap(
       spacing: 6,
       runSpacing: 4,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: <Widget>[
-        Text('$label:',
-            style: theme.textTheme.bodySmall
-                ?.copyWith(fontWeight: FontWeight.w600)),
+        Text(
+          '$label:',
+          style: theme.textTheme.bodySmall?.copyWith(
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         for (final mod in modules)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),

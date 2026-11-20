@@ -152,10 +152,7 @@ void main() {
           llm,
           // Nudge off so the run ends cleanly; the wipe bug is independent
           // of plan-first (the controller tracks latestTodos regardless).
-          AppSettings(autoTitle: false,
-            planFirst: false,
-            runUntilDone: false,
-          ),
+          AppSettings(autoTitle: false, planFirst: false, runUntilDone: false),
         );
 
         await container.read(chatControllerProvider.notifier).send('do a task');
@@ -217,10 +214,7 @@ void main() {
         ]);
         final ProviderContainer container = containerFor(
           llm,
-          AppSettings(autoTitle: false,
-            planFirst: false,
-            runUntilDone: false,
-          ),
+          AppSettings(autoTitle: false, planFirst: false, runUntilDone: false),
         );
 
         await container.read(chatControllerProvider.notifier).send('do a task');
@@ -277,10 +271,7 @@ void main() {
       ]);
       final ProviderContainer container = containerFor(
         llm,
-        AppSettings(autoTitle: false,
-          planFirst: false,
-          runUntilDone: false,
-        ),
+        AppSettings(autoTitle: false, planFirst: false, runUntilDone: false),
       );
 
       await container.read(chatControllerProvider.notifier).send('do a task');
@@ -317,7 +308,8 @@ void main() {
       ]);
       final ProviderContainer container = containerFor(
         llm,
-        AppSettings(autoTitle: false,
+        AppSettings(
+          autoTitle: false,
           planFirst: false,
           runUntilDone: false,
           maxSteps: 45,
@@ -352,10 +344,7 @@ void main() {
         ]);
         final ProviderContainer container = containerFor(
           llm,
-          AppSettings(autoTitle: false,
-            planFirst: false,
-            runUntilDone: true,
-          ),
+          AppSettings(autoTitle: false, planFirst: false, runUntilDone: true),
         );
 
         await container.read(chatControllerProvider.notifier).send('do it');

@@ -95,8 +95,11 @@ void main() {
       //    bridge reports state = running. ModelChip paints exactly one
       //    Icons.circle (size 7) as the health dot.
       final Icon dot = tester.widget(find.byIcon(Icons.circle)) as Icon;
-      expect(dot.color, kAccentColor,
-          reason: 'runtime is running → the chip dot must be the accent color');
+      expect(
+        dot.color,
+        kAccentColor,
+        reason: 'runtime is running → the chip dot must be the accent color',
+      );
 
       // 3. The old "missing API key" error path is gone: nothing in the tree
       //    mentions an API key (the missingApiKey string now talks about the

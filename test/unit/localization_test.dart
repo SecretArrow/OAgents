@@ -34,16 +34,18 @@ void main() {
       expect(s.missingApiKey.toLowerCase(), contains('opencode'));
     });
 
-    test('unknown codes fall back to English (which also mentions opencode)',
-        () {
-      expect(appStringsFor('xx'), isA<AppStringsEn>());
-      expect(
-        appStringsFor('').missingApiKey.toLowerCase(),
-        contains('opencode'),
-      );
-      // Case-insensitive resolution.
-      expect(appStringsFor('ID'), isA<AppStringsId>());
-      expect(appStringsFor('ES'), isA<AppStringsEs>());
-    });
+    test(
+      'unknown codes fall back to English (which also mentions opencode)',
+      () {
+        expect(appStringsFor('xx'), isA<AppStringsEn>());
+        expect(
+          appStringsFor('').missingApiKey.toLowerCase(),
+          contains('opencode'),
+        );
+        // Case-insensitive resolution.
+        expect(appStringsFor('ID'), isA<AppStringsId>());
+        expect(appStringsFor('ES'), isA<AppStringsEs>());
+      },
+    );
   });
 }

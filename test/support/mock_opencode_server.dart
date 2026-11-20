@@ -188,9 +188,7 @@ class MockOpencodeServer {
     if (!streamFlag) {
       res.statusCode = HttpStatus.ok;
       res.headers.contentType = ContentType.json;
-      res.write(
-        jsonEncode(_nonStreamingPayload(lastUserContent)),
-      );
+      res.write(jsonEncode(_nonStreamingPayload(lastUserContent)));
       await res.flush();
       await res.close();
       return;
@@ -232,7 +230,9 @@ class MockOpencodeServer {
     events.add(
       jsonEncode(<String, dynamic>{
         'choices': <Map<String, dynamic>>[
-          <String, dynamic>{'delta': <String, dynamic>{'content': 'Hello '}},
+          <String, dynamic>{
+            'delta': <String, dynamic>{'content': 'Hello '},
+          },
         ],
       }),
     );
@@ -249,10 +249,7 @@ class MockOpencodeServer {
     events.add(
       jsonEncode(<String, dynamic>{
         'choices': <dynamic>[],
-        'usage': <String, dynamic>{
-          'prompt_tokens': 12,
-          'completion_tokens': 4,
-        },
+        'usage': <String, dynamic>{'prompt_tokens': 12, 'completion_tokens': 4},
       }),
     );
 
@@ -312,10 +309,7 @@ class MockOpencodeServer {
           },
         },
       ],
-      'usage': <String, dynamic>{
-        'prompt_tokens': 12,
-        'completion_tokens': 4,
-      },
+      'usage': <String, dynamic>{'prompt_tokens': 12, 'completion_tokens': 4},
     };
   }
 
