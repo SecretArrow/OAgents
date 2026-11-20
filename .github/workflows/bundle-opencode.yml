@@ -143,6 +143,13 @@ jobs:
           EOF
           bun bundle.config.mjs
           test -s ../opencode.bundle.mjs
+          # photon-node's wasm is require.resolve'd at RUNTIME (via env
+          # OPENCODE_PHOTON_WASM_PATH, default createRequire().resolve) —
+          # esbuild loaders cannot rewrite that dynamic resolution. Stage
+          # the wasm file next to the bundle; the launcher points the env
+          # at it.
+          cp "$(ls -d node_modules/.bun/@silvia-odwyer+photon-node@*/node_modules/@silvia-odwyer/photon-node/photon_rs_bg.wasm | head -1)" \
+             ../photon_rs_bg.wasm
           # The OAgents Kotlin bridge spawns the launcher as a script:
           #   node lib/opencode.bundle.js
           # with OPENCODE_SERVE=1 and PORT set (script mode, NOT --eval:
@@ -173,6 +180,11 @@ jobs:
               process.argv.push('--port', process.env.PORT)
             }
           }
+          // photon-node's wasm sits next to this launcher (staged by the
+          // bundle workflow); without this the bundle would require.resolve
+          // the package, which only exists in the build tree, not on-device.
+          process.env.OPENCODE_PHOTON_WASM_PATH ??=
+            new URL('./photon_rs_bg.wasm', import.meta.url).pathname
           await import('./opencode.bundle.mjs')
           EOF
 
@@ -427,6 +439,7 @@ jobs:
           # opencode bundle + metadata
           cp opencode.bundle.js "$ROOT/lib/opencode.bundle.js"
           cp opencode.bundle.mjs "$ROOT/lib/opencode.bundle.mjs"
+          cp photon_rs_bg.wasm "$ROOT/lib/photon_rs_bg.wasm"
           cp opencode-src/package.json "$ROOT/lib/package.json"
           # curated node_modules
           cp -r toolbox-staging/lib/node_modules/. "$ROOT/lib/node_modules/"
