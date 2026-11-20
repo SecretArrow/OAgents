@@ -64,7 +64,7 @@ jobs:
         # The commit message contains [skip ci] so this push does not re-trigger
         # auto-fix (or any other) workflow. The push authenticates with the
         # OAGENTS_CI_TOKEN configured on the checkout step above.
-        uses: stefanzweifel/git-auto-commit-action@v5
+        uses: stefanzweifel/git-auto-commit-action@v7
         with:
           commit_message: 'chore(auto-fix): apply dart fix + format [skip ci]'
           file_pattern: lib/** test/**
