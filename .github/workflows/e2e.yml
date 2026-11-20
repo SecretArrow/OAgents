@@ -45,7 +45,9 @@ jobs:
       - name: Resolve dependencies
         run: flutter pub get
 
-      - name: Run integration tests
-        # integration_test/ starts a mock opencode server fixture inside the test
-        # process; no external service or real opencode runtime is required.
-        run: flutter test integration_test/
+      - name: Run e2e tests
+        # Host-runnable hermetic suite (mock opencode server in-process, no
+        # device/emulator needed). Lives under test/e2e/ because plain
+        # `flutter test integration_test/` requires a connected device, which
+        # CI runners don't have.
+        run: flutter test test/e2e/

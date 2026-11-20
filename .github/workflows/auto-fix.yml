@@ -54,11 +54,11 @@ jobs:
 
       - name: Apply dart fix (best-effort)
         continue-on-error: true
-        run: dart fix --apply lib/ test/ integration_test/
+        run: dart fix --apply lib/ test/
 
       - name: Format
         # dart fix can leave code unformatted; normalize afterwards.
-        run: dart format lib/ test/ integration_test/
+        run: dart format lib/ test/
 
       - name: Commit fixes (only if files changed)
         # The commit message contains [skip ci] so this push does not re-trigger
@@ -67,7 +67,7 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: 'chore(auto-fix): apply dart fix + format [skip ci]'
-          file_pattern: lib/** test/** integration_test/**
+          file_pattern: lib/** test/**
           commit_user_name: oagents-bot
           commit_user_email: bot@secretarrow.oagents
 

@@ -18,7 +18,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:integration_test/integration_test.dart';
 import 'package:oagents/di.dart';
 import 'package:oagents/l10n/app_strings.dart';
 import 'package:oagents/models/models.dart';
@@ -28,10 +27,13 @@ import 'package:oagents/services/settings_repository.dart';
 import 'package:oagents/ui/theme.dart';
 import 'package:oagents/ui/widgets/model_picker.dart';
 
-import '../test/support/mock_opencode_server.dart';
+import '../support/mock_opencode_server.dart';
 
 void main() {
-  IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+  // Host-runnable binding: the test is hermetic (mock server + widget pump,
+  // no device/emulator needed) — IntegrationTestWidgetsFlutterBinding would
+  // require a connected device, which plain CI runners don't have.
+  TestWidgetsFlutterBinding.ensureInitialized();
 
   late MockOpencodeServer server;
 
