@@ -28,7 +28,10 @@ jobs:
       - name: Set up Flutter (stable, SDK + pub + gradle cached)
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: stable
+          # channel: stable — NOT flutter-version: stable (the version
+          # input expects a concrete version like 3.50.0 and misparses
+          # 'stable', erroring with 'Unable to determine Flutter version')
+          channel: stable
           cache: true
           cache-path-builder: true
 
