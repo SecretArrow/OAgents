@@ -133,6 +133,10 @@ jobs:
             outfile: '../opencode.bundle.mjs',
             external: externals,
             alias: { 'jsonc-parser': jsoncEsm },
+            // Inline wasm (photon-node's photon_rs_bg.wasm is require.resolve'd
+            // at runtime; on-device there is no .bun store to resolve it
+            // from) and stray .node payloads as data URLs.
+            loader: { '.wasm': 'dataurl', '.node': 'dataurl' },
             banner: { js: banner },
             logLevel: 'info',
           })
@@ -150,22 +154,26 @@ jobs:
           # under OPENCODE_SERVE=1 and dynamic-imports the ESM bundle (cjs
           # cannot statically import esm).
           cat > ../opencode.bundle.js <<'EOF'
-          // OAgents embedded-opencode launcher (CommonJS).
+          // OAgents embedded-opencode launcher (ESM — the staged
+          // lib/package.json is opencode's own and declares "type":
+          // "module", so node parses .js here as ESM; a CommonJS
+          // launcher would die with 'module is not defined').
           //
           // Executed by the Kotlin bridge as a script:
           //   node lib/opencode.bundle.js
-          // with OPENCODE_SERVE=1 and PORT set. The real opencode CLI bundle
-          // (opencode.bundle.mjs) is ESM and dispatches on process.argv — no
-          // args means interactive TUI. This launcher injects the serve argv
-          // first so running it boots the headless HTTP server on $PORT
-          // (4096), which the bridge polls via GET /health.
+          // with OPENCODE_SERVE=1 and PORT set. The real opencode CLI
+          // bundle (opencode.bundle.mjs) dispatches on process.argv —
+          // no args means interactive TUI. This launcher injects the
+          // serve argv first so running it boots the headless HTTP
+          // server on $PORT (4096), which the bridge polls via
+          // GET /health.
           if (process.env.OPENCODE_SERVE === '1') {
             if (!process.argv.includes('serve')) process.argv.push('serve')
             if (process.env.PORT && !process.argv.includes(process.env.PORT)) {
               process.argv.push('--port', process.env.PORT)
             }
           }
-          module.exports = import('./opencode.bundle.mjs')
+          await import('./opencode.bundle.mjs')
           EOF
 
       - name: Smoke-test the bundle (CLI + serve + /health)
