@@ -31,7 +31,7 @@ void main() {
     overrides: testOverrides(
       llm: llm,
       dir: tempDir,
-      settings: settings ?? AppSettings(apiKey: 'test-key'),
+      settings: settings ?? AppSettings(),
       writeScreenshots: false,
     ),
     child: const OAgentsApp(),
@@ -164,7 +164,7 @@ void main() {
         overrides: <Override>[
           ...testOverrides(
             dir: tempDir,
-            settings: AppSettings(apiKey: 'test-key'),
+            settings: AppSettings(),
             writeScreenshots: false,
           ),
           chatListProvider.overrideWith(
@@ -246,7 +246,7 @@ void main() {
           // forever and pumpAndSettle would time out).
           ...testOverrides(
             dir: tempDir,
-            settings: AppSettings(apiKey: 'test-key'),
+            settings: AppSettings(),
             writeScreenshots: false,
           ),
           chatListProvider.overrideWith((Ref ref) async => <ChatSummary>[]),
@@ -305,7 +305,7 @@ void main() {
           // forever and pumpAndSettle would time out).
           ...testOverrides(
             dir: tempDir,
-            settings: AppSettings(apiKey: 'test-key'),
+            settings: AppSettings(),
             writeScreenshots: false,
           ),
           chatListProvider.overrideWith((Ref ref) async => <ChatSummary>[]),
@@ -352,7 +352,7 @@ void main() {
         overrides: <Override>[
           ...testOverrides(
             dir: tempDir,
-            settings: AppSettings(apiKey: 'test-key', askRandomUa: false),
+            settings: AppSettings(askRandomUa: false),
             writeScreenshots: false,
           ),
           chatListProvider.overrideWith((Ref ref) async => <ChatSummary>[]),
@@ -387,7 +387,7 @@ void main() {
         overrides: <Override>[
           ...testOverrides(
             dir: tempDir,
-            settings: AppSettings(apiKey: 'test-key'),
+            settings: AppSettings(),
             writeScreenshots: false,
           ),
           chatListProvider.overrideWith((Ref ref) async => <ChatSummary>[]),

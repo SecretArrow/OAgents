@@ -88,7 +88,7 @@ void main() {
           ...testOverrides(
             llm: _GatedLlmClient(gate),
             dir: tempDir,
-            settings: AppSettings(apiKey: 'test-key'),
+            settings: AppSettings(),
             writeScreenshots: false,
           ),
           chatListProvider.overrideWith((Ref ref) async => <ChatSummary>[]),
@@ -221,7 +221,7 @@ void main() {
             ...testOverrides(
               llm: _QueueGatedLlmClient(<Completer<void>>[gate1, gate2]),
               dir: tempDir,
-              settings: AppSettings(apiKey: 'test-key'),
+              settings: AppSettings(),
               writeScreenshots: false,
             ),
             chatListProvider.overrideWith((Ref ref) async => <ChatSummary>[]),

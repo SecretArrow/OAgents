@@ -30,7 +30,7 @@ void main() {
       ...testOverrides(
         llm: llm,
         dir: tempDir,
-        settings: settings ?? AppSettings(apiKey: 'test-key', autoTitle: false),
+        settings: settings ?? AppSettings(autoTitle: false),
         writeScreenshots: false,
       ),
       // v1.41.0: this file performs MULTIPLE sends on one session. The

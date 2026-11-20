@@ -41,7 +41,7 @@ void main() {
         ...testOverrides(
           llm: llm,
           dir: tempDir,
-          settings: AppSettings(apiKey: 'k', autoTitle: false),
+          settings: AppSettings(autoTitle: false),
         ),
         if (store != null) chatStoreProvider.overrideWithValue(store),
       ],

@@ -51,7 +51,7 @@ void main() {
         ...testOverrides(
           llm: llm ?? ScriptedLlmClient(<AssistantTurn>[]),
           dir: tempDir,
-          settings: AppSettings(apiKey: 'test-key', autoTitle: false),
+          settings: AppSettings(autoTitle: false),
           writeScreenshots: false,
         ),
         moduleRegistryProvider.overrideWithValue(registry),

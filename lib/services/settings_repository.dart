@@ -125,3 +125,21 @@ class FlutterSecretBox implements SecretBox {
   @override
   Future<void> delete(String key) async => _store.remove(key);
 }
+
+/// Plain in-memory [SecretBox] — the test double skill tests inject via
+/// `SkillRegistry(secretBox: InMemorySecretBox())`. Shares nothing with
+/// [FlutterSecretBox]'s store on purpose: tests need an isolated box.
+class InMemorySecretBox implements SecretBox {
+  InMemorySecretBox([Map<String, String>? initial]) : _values = {...?initial};
+
+  final Map<String, String> _values;
+
+  @override
+  Future<String?> read(String key) async => _values[key];
+
+  @override
+  Future<void> write(String key, String value) async => _values[key] = value;
+
+  @override
+  Future<void> delete(String key) async => _values.remove(key);
+}

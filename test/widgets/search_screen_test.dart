@@ -88,7 +88,7 @@ Widget wrap(
   overrides: <Override>[
     ...testOverrides(
       dir: dir,
-      settings: AppSettings(apiKey: 'k', autoTitle: false),
+      settings: AppSettings(autoTitle: false),
       writeScreenshots: false,
     ),
     ...extra,
@@ -255,7 +255,7 @@ void main() {
         overrides: <Override>[
           ...testOverrides(
             dir: tempDir,
-            settings: AppSettings(apiKey: 'k', autoTitle: false),
+            settings: AppSettings(autoTitle: false),
             writeScreenshots: false,
           ),
           chatStoreProvider.overrideWithValue(scripted),

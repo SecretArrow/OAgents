@@ -152,9 +152,7 @@ void main() {
           llm,
           // Nudge off so the run ends cleanly; the wipe bug is independent
           // of plan-first (the controller tracks latestTodos regardless).
-          AppSettings(
-            apiKey: 'k',
-            autoTitle: false,
+          AppSettings(autoTitle: false,
             planFirst: false,
             runUntilDone: false,
           ),
@@ -219,9 +217,7 @@ void main() {
         ]);
         final ProviderContainer container = containerFor(
           llm,
-          AppSettings(
-            apiKey: 'k',
-            autoTitle: false,
+          AppSettings(autoTitle: false,
             planFirst: false,
             runUntilDone: false,
           ),
@@ -281,9 +277,7 @@ void main() {
       ]);
       final ProviderContainer container = containerFor(
         llm,
-        AppSettings(
-          apiKey: 'k',
-          autoTitle: false,
+        AppSettings(autoTitle: false,
           planFirst: false,
           runUntilDone: false,
         ),
@@ -323,9 +317,7 @@ void main() {
       ]);
       final ProviderContainer container = containerFor(
         llm,
-        AppSettings(
-          apiKey: 'k',
-          autoTitle: false,
+        AppSettings(autoTitle: false,
           planFirst: false,
           runUntilDone: false,
           maxSteps: 45,
@@ -360,9 +352,7 @@ void main() {
         ]);
         final ProviderContainer container = containerFor(
           llm,
-          AppSettings(
-            apiKey: 'k',
-            autoTitle: false,
+          AppSettings(autoTitle: false,
             planFirst: false,
             runUntilDone: true,
           ),

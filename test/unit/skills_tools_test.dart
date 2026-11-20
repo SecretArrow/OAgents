@@ -403,7 +403,7 @@ void main() {
         overrides: testOverrides(
           llm: llm,
           dir: docs,
-          settings: AppSettings(apiKey: 'k', autoTitle: false),
+          settings: AppSettings(autoTitle: false),
         ),
       );
       addTearDown(container.dispose);
@@ -439,7 +439,7 @@ void main() {
         overrides: testOverrides(
           llm: llm,
           dir: docs,
-          settings: AppSettings(apiKey: 'k', autoTitle: false),
+          settings: AppSettings(autoTitle: false),
         ),
       );
       addTearDown(container.dispose);

@@ -107,7 +107,7 @@ void main() {
                     ],
               ),
           dir: tempDir,
-          settings: AppSettings(apiKey: 'k', autoTitle: false),
+          settings: AppSettings(autoTitle: false),
         ),
         moduleRegistryProvider.overrideWithValue(registry),
         moduleRuntimeProvider.overrideWithValue(moduleRuntime),

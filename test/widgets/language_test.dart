@@ -24,7 +24,7 @@ void main() {
   Widget wrap({AppSettings? settings}) => ProviderScope(
     overrides: testOverrides(
       dir: tempDir,
-      settings: settings ?? AppSettings(apiKey: 'k'),
+      settings: settings ?? AppSettings(),
     ),
     child: const OAgentsApp(),
   );
@@ -130,7 +130,7 @@ void main() {
   ) async {
     await tester.pumpWidget(
       wrap(
-        settings: AppSettings(apiKey: 'k', languageCode: 'id'),
+        settings: AppSettings(languageCode: 'id'),
       ),
     );
     await tester.pump();

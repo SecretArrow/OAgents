@@ -94,7 +94,7 @@ void main() {
             ...testOverrides(
               llm: _GatedLlmClient(gate),
               dir: tempDir,
-              settings: AppSettings(apiKey: 'test-key'),
+              settings: AppSettings(),
               writeScreenshots: false,
             ),
             chatListProvider.overrideWith((Ref ref) async => <ChatSummary>[]),

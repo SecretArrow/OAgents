@@ -17,7 +17,7 @@ Future<ProviderContainer> _container(Directory dir) async {
     overrides: testOverrides(
       llm: ScriptedLlmClient(<AssistantTurn>[AssistantTurn(content: 'ok')]),
       dir: dir,
-      settings: AppSettings(apiKey: 'test-key', autoTitle: false),
+      settings: AppSettings(autoTitle: false),
     ),
   );
   addTearDown(container.dispose);

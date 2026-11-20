@@ -34,8 +34,8 @@ class _StubbornClient extends http.BaseClient {
 }
 
 const LlmConfig _config = LlmConfig(
-  baseUrl: 'https://provider.test',
-  apiKey: 'k',
+  serverUrl: 'https://provider.test',
+  authToken: 'k',
   model: 'm',
 );
 
@@ -53,7 +53,7 @@ void main() {
   group('LlmClient.forceCancel (v1.42.0)', () {
     test('kills a stalled in-flight stream and unregisters it', () async {
       final _StubbornClient stubborn = _StubbornClient();
-      final LlmClient client = LlmClient(client: stubborn);
+      final LlmClient client = LlmClient(httpClient: stubborn);
       final Object key = Object();
 
       final Future<AssistantTurn> future = client.complete(
@@ -97,9 +97,9 @@ void main() {
         final _StubbornClient stubborn = _StubbornClient();
         final ProviderContainer container = ProviderContainer(
           overrides: testOverrides(
-            llm: LlmClient(client: stubborn),
+            llm: LlmClient(httpClient: stubborn),
             dir: tempDir,
-            settings: AppSettings(apiKey: 'k', autoTitle: false),
+            settings: AppSettings(autoTitle: false),
           ),
         );
         addTearDown(container.dispose);

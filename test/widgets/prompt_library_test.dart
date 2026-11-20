@@ -41,7 +41,7 @@ void main() {
       ProviderScope(
         overrides: testOverrides(
           dir: tempDir,
-          settings: AppSettings(apiKey: 'k', autoTitle: false),
+          settings: AppSettings(autoTitle: false),
           writeScreenshots: false,
         ),
         child: Builder(
@@ -98,7 +98,7 @@ void main() {
       ProviderScope(
         overrides: testOverrides(
           dir: tempDir,
-          settings: AppSettings(apiKey: 'k', autoTitle: false),
+          settings: AppSettings(autoTitle: false),
           writeScreenshots: false,
           prompts: <PromptEntry>[
             PromptEntry(
@@ -152,7 +152,7 @@ void main() {
         overrides: <Override>[
           ...testOverrides(
             dir: tempDir,
-            settings: AppSettings(apiKey: 'k', autoTitle: false),
+            settings: AppSettings(autoTitle: false),
             writeScreenshots: false,
             prompts: <PromptEntry>[
               PromptEntry(
@@ -190,7 +190,7 @@ void main() {
         overrides: <Override>[
           ...testOverrides(
             dir: tempDir,
-            settings: AppSettings(apiKey: 'k', autoTitle: false),
+            settings: AppSettings(autoTitle: false),
             writeScreenshots: false,
           ),
           chatListProvider.overrideWith((Ref ref) async => <ChatSummary>[]),

@@ -44,7 +44,7 @@ void main() {
     overrides: testOverrides(
       llm: llm,
       dir: tempDir,
-      settings: AppSettings(apiKey: 'test-key'),
+      settings: AppSettings(),
       writeScreenshots: false,
     ),
     child: const OAgentsApp(),

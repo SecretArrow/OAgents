@@ -37,7 +37,7 @@ void main() {
         ...testOverrides(
           llm: llm,
           dir: tempDir,
-          settings: settings ?? AppSettings(apiKey: 'k', autoTitle: false),
+          settings: settings ?? AppSettings(autoTitle: false),
         ),
         ...extra,
       ],

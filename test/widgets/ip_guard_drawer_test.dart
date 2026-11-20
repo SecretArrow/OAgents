@@ -37,9 +37,7 @@ Future<ProviderContainer> pumpApp(
       overrides: <Override>[
         ...testOverrides(
           dir: tempDir,
-          settings: AppSettings(
-            apiKey: 'test-key',
-            ipSwitchWarnEnabled: warnEnabled,
+          settings: AppSettings(ipSwitchWarnEnabled: warnEnabled,
           ),
           writeScreenshots: false,
         ),

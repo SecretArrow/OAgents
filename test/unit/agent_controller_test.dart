@@ -22,7 +22,7 @@ Future<ProviderContainer> _container(
     overrides: testOverrides(
       llm: ScriptedLlmClient(turns),
       dir: dir,
-      settings: settings ?? AppSettings(apiKey: 'test-key', autoTitle: false),
+      settings: settings ?? AppSettings(autoTitle: false),
     ),
   );
   addTearDown(container.dispose);
@@ -135,7 +135,7 @@ void main() {
     final ProviderContainer container = await _container(
       <AssistantTurn>[AssistantTurn(content: 'tidak boleh dipanggil')],
       tempDir,
-      settings: AppSettings(apiKey: ''),
+      settings: AppSettings(),
     );
 
     await container.read(chatControllerProvider.notifier).send('Halo');
@@ -163,9 +163,7 @@ void main() {
       overrides: testOverrides(
         llm: scripted,
         dir: tempDir,
-        settings: AppSettings(
-          apiKey: 'k',
-          autoTitle: false,
+        settings: AppSettings(autoTitle: false,
           maxSteps: 2,
           runUntilDone: false,
         ),
@@ -190,7 +188,7 @@ void main() {
         overrides: testOverrides(
           llm: llm,
           dir: tempDir,
-          settings: AppSettings(apiKey: 'k', autoTitle: false),
+          settings: AppSettings(autoTitle: false),
         ),
       );
       addTearDown(container.dispose);
@@ -251,7 +249,7 @@ void main() {
     final ProviderContainer container = await _container(
       <AssistantTurn>[AssistantTurn(content: 'hi there')],
       tempDir,
-      settings: AppSettings(apiKey: 'k', autoTitle: false),
+      settings: AppSettings(autoTitle: false),
     );
     addTearDown(container.dispose);
     final notifier = container.read(chatControllerProvider.notifier);
@@ -272,7 +270,7 @@ void main() {
       final ProviderContainer container = await _container(
         <AssistantTurn>[AssistantTurn(content: 'ok')],
         tempDir,
-        settings: AppSettings(apiKey: 'k', autoTitle: false),
+        settings: AppSettings(autoTitle: false),
       );
       addTearDown(container.dispose);
 
@@ -322,9 +320,7 @@ void main() {
         llm: llm,
         dir: tempDir,
         // maxSteps=2 would normally cut the loop after two turns.
-        settings: AppSettings(
-          apiKey: 'k',
-          autoTitle: false,
+        settings: AppSettings(autoTitle: false,
           maxSteps: 2,
           runUntilDone: true,
         ),
@@ -357,9 +353,7 @@ void main() {
       overrides: testOverrides(
         llm: llm,
         dir: tempDir,
-        settings: AppSettings(
-          apiKey: 'k',
-          autoTitle: false,
+        settings: AppSettings(autoTitle: false,
           maxSteps: 2,
           runUntilDone: false,
         ),
@@ -414,7 +408,7 @@ void main() {
         ...testOverrides(
           llm: ScriptedLlmClient(<AssistantTurn>[AssistantTurn(content: 'ok')]),
           dir: tempDir,
-          settings: AppSettings(apiKey: 'test-key', autoTitle: false),
+          settings: AppSettings(autoTitle: false),
         ),
         chatStoreProvider.overrideWithValue(ThrowingChatStore()),
       ],
@@ -444,7 +438,7 @@ void main() {
               AssistantTurn(content: 'ok'),
             ]),
             dir: tempDir,
-            settings: AppSettings(apiKey: 'test-key', autoTitle: false),
+            settings: AppSettings(autoTitle: false),
           ),
           chatStoreProvider.overrideWithValue(ThrowingChatStore()),
         ],
@@ -478,7 +472,7 @@ void main() {
             AssistantTurn(content: 'done'),
           ]),
           dir: tempDir,
-          settings: AppSettings(apiKey: 'k', autoTitle: false),
+          settings: AppSettings(autoTitle: false),
         ),
         backgroundRunServiceProvider.overrideWithValue(background),
       ],
@@ -536,9 +530,7 @@ void main() {
           llm: _ThrowingLlmClient(),
           dir: tempDir,
           // Auto-retry OFF: this test pins the RAW error path (no retries).
-          settings: AppSettings(
-            apiKey: 'k',
-            autoTitle: false,
+          settings: AppSettings(autoTitle: false,
             autoRetryEnabled: false,
           ),
         ),
@@ -570,7 +562,7 @@ void main() {
         ...testOverrides(
           llm: llm,
           dir: tempDir,
-          settings: AppSettings(apiKey: 'k', autoTitle: false),
+          settings: AppSettings(autoTitle: false),
         ),
         backgroundRunServiceProvider.overrideWithValue(background),
       ],
@@ -618,7 +610,7 @@ void main() {
       overrides: testOverrides(
         llm: llm,
         dir: tempDir,
-        settings: AppSettings(apiKey: 'k', autoTitle: false),
+        settings: AppSettings(autoTitle: false),
       ),
     );
     addTearDown(container.dispose);
@@ -642,9 +634,7 @@ void main() {
         ...testOverrides(
           llm: ScriptedLlmClient(<AssistantTurn>[AssistantTurn(content: 'ok')]),
           dir: tempDir,
-          settings: AppSettings(
-            apiKey: 'k',
-            autoTitle: false,
+          settings: AppSettings(autoTitle: false,
             runInBackground: false,
           ),
         ),
@@ -667,7 +657,7 @@ void main() {
         overrides: testOverrides(
           llm: llm,
           dir: tempDir,
-          settings: AppSettings(apiKey: 'k', autoTitle: false),
+          settings: AppSettings(autoTitle: false),
           contexts: <ContextEntry>[
             const ContextEntry(
               id: 'c1',
@@ -703,7 +693,7 @@ void main() {
       overrides: testOverrides(
         llm: llm,
         dir: tempDir,
-        settings: AppSettings(apiKey: 'k', autoTitle: false),
+        settings: AppSettings(autoTitle: false),
       ),
     );
     addTearDown(container.dispose);
@@ -740,7 +730,7 @@ void main() {
       overrides: testOverrides(
         llm: llm,
         dir: tempDir,
-        settings: AppSettings(apiKey: 'k', autoTitle: false),
+        settings: AppSettings(autoTitle: false),
       ),
     );
     addTearDown(container.dispose);
@@ -789,7 +779,7 @@ void main() {
         overrides: testOverrides(
           llm: llm,
           dir: tempDir,
-          settings: AppSettings(apiKey: 'k', autoTitle: false),
+          settings: AppSettings(autoTitle: false),
         ),
       );
       addTearDown(container.dispose);
@@ -869,7 +859,7 @@ void main() {
         overrides: testOverrides(
           llm: llm,
           dir: tempDir,
-          settings: AppSettings(apiKey: 'k', autoTitle: false),
+          settings: AppSettings(autoTitle: false),
         ),
       );
       addTearDown(container.dispose);
@@ -956,7 +946,7 @@ void main() {
           overrides: testOverrides(
             llm: llm,
             dir: tempDir,
-            settings: AppSettings(apiKey: 'k', autoTitle: false),
+            settings: AppSettings(autoTitle: false),
           ),
         );
         addTearDown(container.dispose);
@@ -1034,7 +1024,7 @@ void main() {
         overrides: testOverrides(
           llm: llm,
           dir: tempDir,
-          settings: AppSettings(apiKey: 'k', autoTitle: false),
+          settings: AppSettings(autoTitle: false),
         ),
       );
       addTearDown(container.dispose);
@@ -1077,9 +1067,7 @@ void main() {
         overrides: testOverrides(
           llm: llm,
           dir: tempDir,
-          settings: AppSettings(
-            apiKey: 'k',
-            autoTitle: false,
+          settings: AppSettings(autoTitle: false,
             planFirst: false,
             runUntilDone: false,
           ),
@@ -1119,7 +1107,7 @@ void main() {
           overrides: testOverrides(
             llm: llm,
             dir: tempDir,
-            settings: AppSettings(apiKey: 'k', autoTitle: false),
+            settings: AppSettings(autoTitle: false),
           ),
         );
         addTearDown(container.dispose);
@@ -1149,7 +1137,7 @@ void main() {
         overrides: testOverrides(
           llm: llm,
           dir: tempDir,
-          settings: AppSettings(apiKey: 'k', autoTitle: false),
+          settings: AppSettings(autoTitle: false),
         ),
       );
       addTearDown(container.dispose);
@@ -1197,7 +1185,7 @@ void main() {
         overrides: testOverrides(
           llm: llm,
           dir: tempDir,
-          settings: AppSettings(apiKey: 'k', autoTitle: false),
+          settings: AppSettings(autoTitle: false),
         ),
       );
       addTearDown(container.dispose);
@@ -1236,7 +1224,7 @@ void main() {
         overrides: testOverrides(
           llm: llm,
           dir: tempDir,
-          settings: AppSettings(apiKey: 'k', autoTitle: false),
+          settings: AppSettings(autoTitle: false),
         ),
       );
       addTearDown(container.dispose);
@@ -1263,7 +1251,7 @@ void main() {
         overrides: testOverrides(
           llm: llm,
           dir: tempDir,
-          settings: AppSettings(apiKey: 'k', autoTitle: false),
+          settings: AppSettings(autoTitle: false),
         ),
       );
       addTearDown(container.dispose);
@@ -1332,7 +1320,7 @@ void main() {
         overrides: testOverrides(
           llm: llm,
           dir: tempDir,
-          settings: AppSettings(apiKey: 'k', autoTitle: false),
+          settings: AppSettings(autoTitle: false),
         ),
       );
       addTearDown(container.dispose);
@@ -1362,7 +1350,7 @@ void main() {
         overrides: testOverrides(
           llm: llm,
           dir: tempDir,
-          settings: AppSettings(apiKey: 'k', autoTitle: false),
+          settings: AppSettings(autoTitle: false),
         ),
       );
       addTearDown(container.dispose);
@@ -1390,7 +1378,7 @@ void main() {
         overrides: testOverrides(
           llm: llm,
           dir: tempDir,
-          settings: AppSettings(apiKey: 'k', autoTitle: false),
+          settings: AppSettings(autoTitle: false),
         ),
       );
       addTearDown(container.dispose);
@@ -1421,7 +1409,7 @@ void main() {
         overrides: testOverrides(
           llm: llm,
           dir: tempDir,
-          settings: AppSettings(apiKey: 'k', autoTitle: false),
+          settings: AppSettings(autoTitle: false),
         ),
       );
       addTearDown(container.dispose);
@@ -1463,7 +1451,7 @@ void main() {
         overrides: testOverrides(
           llm: llm,
           dir: tempDir,
-          settings: AppSettings(apiKey: 'k', autoTitle: false),
+          settings: AppSettings(autoTitle: false),
         ),
       );
       addTearDown(container.dispose);
@@ -1507,7 +1495,7 @@ void main() {
           llm: llm,
           dir: tempDir,
           // autoTitle defaults to true — nothing to enable.
-          settings: AppSettings(apiKey: 'k'),
+          settings: AppSettings(),
         ),
       );
       addTearDown(container.dispose);
@@ -1537,7 +1525,7 @@ void main() {
         overrides: testOverrides(
           llm: llm,
           dir: tempDir,
-          settings: AppSettings(apiKey: 'k', autoTitle: false),
+          settings: AppSettings(autoTitle: false),
         ),
       );
       addTearDown(container.dispose);
@@ -1558,7 +1546,7 @@ void main() {
           overrides: testOverrides(
             llm: llm,
             dir: tempDir,
-            settings: AppSettings(apiKey: 'k'),
+            settings: AppSettings(),
           ),
         );
         addTearDown(container.dispose);
@@ -1585,7 +1573,7 @@ void main() {
         overrides: testOverrides(
           llm: llm,
           dir: tempDir,
-          settings: AppSettings(apiKey: 'k'),
+          settings: AppSettings(),
         ),
       );
       addTearDown(container.dispose);
@@ -1628,7 +1616,7 @@ void main() {
               AssistantTurn(content: 'ok'),
             ]),
             dir: tempDir,
-            settings: AppSettings(apiKey: 'k', autoTitle: false),
+            settings: AppSettings(autoTitle: false),
           ),
           backgroundRunServiceProvider.overrideWithValue(background),
           appInForegroundProvider.overrideWith((Ref ref) => false),
@@ -1657,7 +1645,7 @@ void main() {
               AssistantTurn(content: 'ok'),
             ]),
             dir: tempDir,
-            settings: AppSettings(apiKey: 'k', autoTitle: false),
+            settings: AppSettings(autoTitle: false),
           ),
           backgroundRunServiceProvider.overrideWithValue(background),
         ],
@@ -1678,9 +1666,7 @@ void main() {
               AssistantTurn(content: 'ok'),
             ]),
             dir: tempDir,
-            settings: AppSettings(
-              apiKey: 'k',
-              autoTitle: false,
+            settings: AppSettings(autoTitle: false,
               notifyOnDone: false,
             ),
           ),
@@ -1707,7 +1693,7 @@ void main() {
         overrides: testOverrides(
           llm: _GatedLlmClient(gates, () => calls++),
           dir: tempDir,
-          settings: AppSettings(apiKey: 'k', autoTitle: false),
+          settings: AppSettings(autoTitle: false),
         ),
       );
       addTearDown(container.dispose);

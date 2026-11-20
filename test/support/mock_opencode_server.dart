@@ -278,7 +278,7 @@ class MockOpencodeServer {
       }
     }
     try {
-      res.add(const utf8.encode('data: [DONE]\n\n'));
+      res.add(utf8.encode('data: [DONE]\n\n'));
       await res.flush();
       await res.close();
     } catch (_) {

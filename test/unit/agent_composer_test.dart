@@ -6,8 +6,8 @@ import '../support/test_doubles.dart';
 
 void main() {
   LlmConfig config() => const LlmConfig(
-    baseUrl: 'https://provider.test/v1',
-    apiKey: 'key',
+    serverUrl: 'https://provider.test/v1',
+    authToken: 'key',
     model: 'test-model',
   );
 

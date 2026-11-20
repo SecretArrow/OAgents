@@ -321,8 +321,8 @@ void main() {
         String? browserContext,
       }) async => const ToolResult(ok: true, llmOutput: 'unused'),
       resolveConfig: () => const LlmConfig(
-        baseUrl: 'https://example.invalid',
-        apiKey: 'k',
+        serverUrl: 'https://example.invalid',
+        authToken: 'k',
         model: 'm',
       ),
       runInChat: runner,
@@ -378,8 +378,8 @@ void main() {
           String? browserContext,
         }) async => const ToolResult(ok: true, llmOutput: 'unused'),
         resolveConfig: () => const LlmConfig(
-          baseUrl: 'https://example.invalid',
-          apiKey: 'k',
+          serverUrl: 'https://example.invalid',
+          authToken: 'k',
           model: 'm',
         ),
       ).dispatch(job);

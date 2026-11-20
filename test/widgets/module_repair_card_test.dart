@@ -37,7 +37,7 @@ void main() {
       overrides: testOverrides(
         llm: ScriptedLlmClient(<AssistantTurn>[AssistantTurn(content: 'ok')]),
         dir: tempDir,
-        settings: AppSettings(apiKey: 'k', autoTitle: false),
+        settings: AppSettings(autoTitle: false),
       ),
     );
     addTearDown(c.dispose);

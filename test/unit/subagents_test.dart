@@ -86,7 +86,7 @@ void main() {
         SubagentRunner(
           llm: llm ?? _TaskKeyedLlm(<String, List<AssistantTurn>>{}),
           resolveConfig: () =>
-              const LlmConfig(baseUrl: 'https://test', apiKey: 'k', model: 'm'),
+              const LlmConfig(serverUrl: 'https://test', authToken: 'k', model: 'm'),
           executeTool: (
             String name,
             Map<String, dynamic> args,
@@ -109,7 +109,7 @@ void main() {
       runner = SubagentRunner(
         llm: _TaskKeyedLlm(<String, List<AssistantTurn>>{}),
         resolveConfig: () =>
-            const LlmConfig(baseUrl: 'x', apiKey: 'k', model: 'm'),
+            const LlmConfig(serverUrl: 'x', authToken: 'k', model: 'm'),
         executeTool: (
           String n,
           Map<String, dynamic> a,
@@ -170,7 +170,7 @@ void main() {
         for (final Map<String, dynamic> tool in SubagentRunner(
           llm: _TaskKeyedLlm(<String, List<AssistantTurn>>{}),
           resolveConfig: () =>
-              const LlmConfig(baseUrl: 'x', apiKey: 'k', model: 'm'),
+              const LlmConfig(serverUrl: 'x', authToken: 'k', model: 'm'),
           executeTool: (
             String n,
             Map<String, dynamic> a,
@@ -257,7 +257,7 @@ void main() {
     final SubagentRunner runner = SubagentRunner(
       llm: llm,
       resolveConfig: () =>
-          const LlmConfig(baseUrl: 'x', apiKey: 'k', model: 'm'),
+          const LlmConfig(serverUrl: 'x', authToken: 'k', model: 'm'),
       executeTool:
           (
             String name,
@@ -304,7 +304,7 @@ void main() {
         final SubagentRunner runner = SubagentRunner(
           llm: llm,
           resolveConfig: () =>
-              const LlmConfig(baseUrl: 'x', apiKey: 'k', model: 'm'),
+              const LlmConfig(serverUrl: 'x', authToken: 'k', model: 'm'),
           executeTool: (
             String n,
             Map<String, dynamic> a,
@@ -362,7 +362,7 @@ void main() {
         subagents: SubagentRunner(
           llm: llm,
           resolveConfig: () =>
-              const LlmConfig(baseUrl: 'x', apiKey: 'k', model: 'm'),
+              const LlmConfig(serverUrl: 'x', authToken: 'k', model: 'm'),
           executeTool:
               (
                 String name,
@@ -418,7 +418,7 @@ void main() {
         final SubagentRunner runner = SubagentRunner(
           llm: llm,
           resolveConfig: () =>
-              const LlmConfig(baseUrl: 'x', apiKey: 'k', model: 'm'),
+              const LlmConfig(serverUrl: 'x', authToken: 'k', model: 'm'),
           executeTool:
               (
                 String n,
@@ -453,7 +453,7 @@ void main() {
         final SubagentRunner runner = SubagentRunner(
           llm: _EndlessToolCallLlm(),
           resolveConfig: () =>
-              const LlmConfig(baseUrl: 'x', apiKey: 'k', model: 'm'),
+              const LlmConfig(serverUrl: 'x', authToken: 'k', model: 'm'),
           executeTool: (
             String n,
             Map<String, dynamic> a,
@@ -480,7 +480,7 @@ void main() {
       final SubagentRunner runner = SubagentRunner(
         llm: _TaskKeyedLlm(<String, List<AssistantTurn>>{}),
         resolveConfig: () =>
-            const LlmConfig(baseUrl: 'x', apiKey: 'k', model: 'm'),
+            const LlmConfig(serverUrl: 'x', authToken: 'k', model: 'm'),
         executeTool: (
           String n,
           Map<String, dynamic> a,
@@ -504,7 +504,7 @@ void main() {
       final SubagentRunner runner = SubagentRunner(
         llm: _TaskKeyedLlm(<String, List<AssistantTurn>>{}),
         resolveConfig: () =>
-            const LlmConfig(baseUrl: 'x', apiKey: 'k', model: 'm'),
+            const LlmConfig(serverUrl: 'x', authToken: 'k', model: 'm'),
         executeTool: (
           String n,
           Map<String, dynamic> a,
@@ -536,7 +536,7 @@ void main() {
             't2': <AssistantTurn>[_final('two')],
           }),
           resolveConfig: () =>
-              const LlmConfig(baseUrl: 'x', apiKey: 'k', model: 'm'),
+              const LlmConfig(serverUrl: 'x', authToken: 'k', model: 'm'),
           executeTool: (
             String n,
             Map<String, dynamic> a,

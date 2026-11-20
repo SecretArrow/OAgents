@@ -91,9 +91,7 @@ void main() {
   });
 
   test('AppSettings persists appLockEnabled + notifyOnDone', () {
-    final AppSettings settings = AppSettings(
-      apiKey: 'k',
-      appLockEnabled: true,
+    final AppSettings settings = AppSettings(appLockEnabled: true,
       notifyOnDone: false,
     );
     final AppSettings restored = AppSettings.fromJson(settings.toJson());
