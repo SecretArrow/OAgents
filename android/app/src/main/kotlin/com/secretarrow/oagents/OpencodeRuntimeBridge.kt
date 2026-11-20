@@ -84,7 +84,6 @@ class OpencodeRuntimeBridge(private val context: Context) {
         private const val METHOD = "com.secretarrow.oagents/opencode"
         private const val EVENTS = "com.secretarrow.oagents/opencode/status"
         private const val ASSET_DIR = "toolbox"
-        private const val TOOLBOX_TAR = "toolbox.tar.gz"
         private const val VERSION_NAME = "version.txt"
         private const val MODULES_MANIFEST = "modules.json"
         private const val BUNDLE_NAME = "opencode.bundle.js"
@@ -342,15 +341,38 @@ class OpencodeRuntimeBridge(private val context: Context) {
     }
 
     private fun extractToolboxTar(destDir: File) {
+        // The bundle workflow ships toolbox.tar.gz, but AGP's asset pipeline
+        // STRIPS the .gz extension and stores the decompressed stream as
+        // toolbox.tar inside the APK (default behavior for .gz assets). Try
+        // the plain-tar name first (what's actually in the packaged APK),
+        // then fall back to the gzipped name + GZIPInputStream (covers a
+        // future aaptOptions { noCompress 'gz' } that keeps the .gz name).
+        val plain = "$ASSET_DIR/toolbox.tar"
+        val gzipped = "$ASSET_DIR/toolbox.tar.gz"
+        val assets = context.assets
+        val (open, isGz) = try {
+            assets.open(plain).use { it.skip(1) }
+            plain to false
+        } catch (_: IOException) {
+            try {
+                assets.open(gzipped).use { it.skip(1) }
+                gzipped to true
+            } catch (e: IOException) {
+                throw IOException(
+                    "Missing or corrupt bundled toolbox tar ($plain / $gzipped): " +
+                        "run the CI bundle-opencode job to produce the Node toolbox.",
+                    e,
+                )
+            }
+        }
         try {
-            context.assets.open("$ASSET_DIR/$TOOLBOX_TAR").use { input ->
-                GZIPInputStream(input).use { gz ->
-                    TarExtractor(gz).extractTo(destDir)
-                }
+            assets.open(open).use { input ->
+                val stream = if (isGz) GZIPInputStream(input) else input
+                stream.use { TarExtractor(it).extractTo(destDir) }
             }
         } catch (e: IOException) {
             throw IOException(
-                "Missing or corrupt bundled asset $ASSET_DIR/$TOOLBOX_TAR: " +
+                "Corrupt bundled toolbox tar ($open): " +
                     "run the CI bundle-opencode job to produce the Node toolbox.",
                 e,
             )
