@@ -1127,10 +1127,10 @@ class AppSettings {
     final String legacyModel = (json['model'] as String? ?? '').trim();
     final String model =
         (json['opencodeModel'] as String? ?? '').trim().isNotEmpty
-        ? (json['opencodeModel'] as String?)
+        ? ((json['opencodeModel'] as String?) ?? '').trim()
         : legacyModel;
     return AppSettings(
-      opencodeModel: model ?? '',
+      opencodeModel: model,
       agentMode: json['agentMode'] as bool? ?? true,
       automationEnabled: json['automationEnabled'] as bool? ?? true,
       maxSteps: clampMaxSteps(json['maxSteps'] ?? defaultMaxSteps),
