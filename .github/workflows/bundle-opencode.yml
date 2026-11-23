@@ -693,6 +693,36 @@ jobs:
           fi
           echo "chat SSE transcript (first 400 bytes):"
           head -c 400 /tmp/chat.sse; echo
+          # Credential round-trip THROUGH the adapter port (4096): proves
+          # the generic /api/* proxy end-to-end — the same route the app's
+          # Dart setup UI uses to store provider keys.
+          CRED=$(curl -fsS -m 10 -X POST http://127.0.0.1:4096/api/credential \
+            -H 'content-type: application/json' \
+            -d '{"integrationID":"openai","value":{"type":"key","key":"sk-smoke"}}') \
+            || { echo "::error::credential POST via adapter failed"; exit 1; }
+          CRED_ID=$(echo "$CRED" | node -e "
+            const d = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+            if (!d?.data?.id) process.exit(1);
+            console.log(d.data.id);
+          ") || { echo "::error::credential create response missing data.id"; exit 1; }
+          echo "credential created: $CRED_ID"
+          curl -fsS -m 10 http://127.0.0.1:4096/api/credential | node -e "
+            const id = process.argv[1];
+            const d = JSON.parse(require('fs').readFileSync(0, 'utf8'));
+            if (!(d.data || []).some((c) => c.id === id)) {
+              console.error('credential ' + id + ' not in list'); process.exit(1);
+            }
+            console.log('credential listed: ' + id);
+          " "$CRED_ID" || { echo "::error::credential not listed after create"; exit 1; }
+          code=$(curl -sS -m 10 -o /dev/null -w '%{http_code}' \
+            -X DELETE "http://127.0.0.1:4096/api/credential/$CRED_ID")
+          [ "$code" = "204" ] || { echo "::error::credential delete returned $code, want 204"; exit 1; }
+          echo "credential deleted: 204"
+          if curl -fsS -m 10 http://127.0.0.1:4096/api/credential | grep -q "$CRED_ID"; then
+            echo "::error::credential $CRED_ID still listed after delete"
+            exit 1
+          fi
+          echo "credential round-trip through adapter: PASS"
           echo "payload serve + compat adapter smoke: PASS"
           kill $AD $SRV 2>/dev/null || true
           wait $AD $SRV 2>/dev/null || true

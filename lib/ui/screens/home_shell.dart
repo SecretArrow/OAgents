@@ -92,10 +92,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
         // which users found disruptive mid-scroll.
         //
         // v1.54.0: provider auth/config failures (401/403, invalid/missing
-        // API key) additionally get an "Open Providers" shortcut — the fix
-        // is one tap away while the raw error text stays in the body for
-        // honesty. Auth dialogs are sticky (error: true) so the action
-        // cannot evaporate in the 2.6 s info auto-expire.
+        // API key) additionally get an "Open opencode" shortcut — the fix
+        // (re-adding the key under Provider keys) is one tap away while
+        // the raw error text stays in the body for honesty. Auth dialogs
+        // are sticky (error: true) so the action cannot evaporate in the
+        // 2.6 s info auto-expire.
         final bool authTrouble = _looksLikeAuthError(next);
         showAppMessage(
           context,

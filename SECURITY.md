@@ -15,10 +15,10 @@ OAgents stores **no API keys and no provider tokens**. The opencode CLI runs
 embedded inside the app on a fixed loopback endpoint
 (`http://127.0.0.1:4096`) that is reachable only from inside the app sandbox,
 so the app → opencode hop needs no auth. Provider credentials (OpenAI,
-Anthropic, … API keys) are opencode's own concern — they live in opencode's
-own auth file inside the app's private storage and are managed by opencode's
-standard `opencode auth login` flow, never inside OAgents' settings or
-SharedPreferences.
+Anthropic, … API keys) are opencode's own concern — they are added through
+the app's **Provider keys** card (Settings → opencode) and live in
+opencode's own local auth database inside the app's private storage, never
+inside OAgents' settings or SharedPreferences.
 
 ## Revoke any token leaked in chat
 

@@ -34,11 +34,14 @@ const int embeddedOpencodePort = 4096;
 
 This is reachable only from inside the app sandbox. No other app and no
 network host can reach it, so the app → opencode hop needs no auth. The
-process that answers on that port is `node opencode.bundle.js serve --port
-4096` running inside the extracted `filesDir/toolbox/` tree (see
+processes that answer on that port are the opencode server (serve mode) on
+an internal port plus the OpenAI-compat adapter `lib/oagents-compat.mjs`
+proxing to it on `4096` (see
 [section 5](#5-bundled-node-toolbox--manifest-contract)); opencode's **own**
-provider auth (OpenAI / Anthropic API keys) is still opencode's business via
-`opencode auth login` and OAgents stores zero credentials.
+provider auth (OpenAI / Anthropic API keys) is still opencode's business —
+the user adds keys through the in-app **Provider keys** card (see
+[`PROVIDER_KEYS.md`](PROVIDER_KEYS.md)) and they land in opencode's own
+local auth database. OAgents stores zero credentials in its settings.
 
 ---
 
@@ -176,7 +179,7 @@ comes back as a status map with `state = "failed"` and a human-readable
 
 | Method | Args | Returns | Effect |
 |---|---|---|---|
-| `start` | none | `{"state":"starting", …}` (immediate), then status events | Spawns a background thread that extracts the bundled toolbox tarball to `filesDir/toolbox/` on first launch, selects the Node binary for the device ABI, starts the foreground service, spawns `node opencode.bundle.js serve --port 4096`, and polls `GET /health`. Emits `extracting` → `starting` → `running` (or `failed`). |
+| `start` | none | `{"state":"starting", …}` (immediate), then status events | Spawns a background thread that extracts the bundled toolbox tarball to `filesDir/toolbox/` on first launch, selects the Node binary for the device ABI, starts the foreground service, spawns the opencode server (`node opencode.bundle.js`, serve mode, internal port 4097) plus the OpenAI-compat adapter (`node lib/oagents-compat.mjs`, app-facing port 4096), and polls `GET /health`. Emits `extracting` → `starting` → `running` (or `failed`). |
 | `stop` | none | `{"state":"stopped", …}` | Destroys the opencode process (`destroyForcibly`) and stops the foreground service. Safe to call when already stopped. |
 | `status` | none | current status map | Polls the current status without changing the runtime state. |
 | `version` | none | `String` | The toolbox revision string read from the bundled `version.txt` at extraction time, in the form `opencode-<sha>+toolbox-<sha>`. Empty string if unavailable. |
@@ -267,12 +270,14 @@ is **extract → select ABI → chmod → spawn with environment → poll /healt
 5. **Start the foreground service** (`OAgentsForegroundService`) with a
    persistent notification and wake lock so a backgrounded app keeps the
    opencode process alive.
-6. **Spawn** the opencode process:
+6. **Spawn** the opencode processes — the server (serve mode) on the
+   internal port, then the OpenAI-compat adapter on the app-facing port:
 
    ```
-   node opencode.bundle.js serve --port 4096
+   node opencode.bundle.js        # OPENCODE_SERVE=1, PORT=4097 (server)
+   node lib/oagents-compat.mjs    # PORT=4096 (app-facing adapter)
    ```
-   with working directory `filesDir/toolbox/`, `redirectErrorStream` on,
+   both with working directory `filesDir/toolbox/`, `redirectErrorStream` on,
    and the following environment so the embedded Node toolbox behaves like
    a real on-device Node environment:
 
@@ -297,8 +302,10 @@ is **extract → select ABI → chmod → spawn with environment → poll /healt
 The toolbox is reached ONLY over `http://127.0.0.1:4096` inside the app
 sandbox — no other app can reach it, no auth is needed on this hop.
 opencode's own provider auth (OpenAI / Anthropic API keys) is still
-opencode's business via `opencode auth login`; OAgents stores zero
-credentials.
+opencode's business: the user adds keys through the in-app **Provider
+keys** card and they live in opencode's own local auth database (see
+[`PROVIDER_KEYS.md`](PROVIDER_KEYS.md)); OAgents stores zero credentials
+in its settings.
 
 ---
 
@@ -326,7 +333,7 @@ States (from `lib/services/opencode_runtime.dart`):
 |---|---|
 | `unknown` | Native bridge has not reported yet (boot window). |
 | `extracting` | First launch: extracting the bundled `assets/toolbox/toolbox.tar.gz` to `filesDir/toolbox/` (opencode bundle + curated `node_modules` + per-ABI binaries + manifest). Skipped on a warm launch unless the bundled revision in `version.txt` changed (a `.extracted-revision` marker gates re-extraction). |
-| `starting` | `node opencode.bundle.js serve --port 4096` spawned inside `filesDir/toolbox/` with `PATH`/`NODE_PATH` env set, waiting for `GET /health` to answer on `embeddedOpencodeUrl`. |
+| `starting` | The opencode server (serve mode, internal port 4097) and the OpenAI-compat adapter (app-facing `4096`) spawned inside `filesDir/toolbox/` with `PATH`/`NODE_PATH` env set, waiting for `GET /health` to answer on `embeddedOpencodeUrl`. |
 | `running` | opencode is up and serving on `embeddedOpencodeUrl`; chat is allowed. |
 | `stopped` | opencode process is not running (user stopped it, or the app was backgrounded and the foreground service was killed). |
 | `failed` | opencode failed to start (tarball extraction error, missing `node-<abi>` for the device ABI, `LD_LIBRARY_PATH` companion-lib resolution failure, port conflict, `/health` timeout). The native bridge surfaces a human-readable `message` naming the missing piece (e.g. the missing ABI). |
@@ -424,7 +431,9 @@ opencode CLI. The toolbox is produced by
 `version.txt`, `modules.json` — nothing is staged into `jniLibs/`) by
 `release.yml`, extracted to `filesDir/toolbox/` at first launch by
 [`OpencodeRuntimeBridge.kt`](../android/app/src/main/kotlin/com/secretarrow/oagents/OpencodeRuntimeBridge.kt),
-and spawned as `node opencode.bundle.js serve --port 4096` under a per-ABI
+and spawned as the opencode server (`node opencode.bundle.js`, serve mode,
+internal port 4097) plus the OpenAI-compat adapter
+(`node lib/oagents-compat.mjs`, app-facing 4096) under a per-ABI
 Termux `node` executable (node 26, Bionic libc + NDK r30, "for Android 24")
 exec'd from `filesDir/toolbox/bin/node-<abi>` with
 `LD_LIBRARY_PATH=filesDir/toolbox/lib/<abi>`. The Dart-side lifecycle is
@@ -464,7 +473,17 @@ toolbox/
     node_modules/         pre-installed packages the embedded opencode runtime
                           AND chat modules can require() with no per-script
                           install. Curated set (see below).
-    opencode.bundle.js    opencode CLI source bundled into one Node-runnable file.
+    opencode.bundle.js    CJS launcher: injects the serve argv/env and
+                          dynamic-imports the ESM bundle.
+    opencode.bundle.mjs  opencode CLI source bundled into one Node-runnable
+                          ESM file (Bun-isms patched post-build).
+    oagents-compat.mjs   OpenAI-compat adapter the app's Dart client talks
+                          to; listens on 4096 and proxies to the opencode
+                          server on the internal port.
+    bun_shim.cjs         Node implementations of the Bun.* surface upstream
+                          opencode expects; loaded before the bundle.
+    install-module.mjs   dynamic module installer for `npm install -g`
+                          into the toolbox prefix.
     package.json          opencode's package.json (for the require graph).
   modules.json            CI-generated manifest of every bundled package +
                          version, categorized (crypto / dev / browser).
@@ -492,8 +511,10 @@ In summary, at `start()` the bridge does: **extract** `assets/toolbox/toolbox.ta
 (`Build.SUPPORTED_ABIS` → `toolbox/bin/node-<abi>`; companion libs at
 `toolbox/lib/<abi>`) → **select agent-browser** (`agent-browser-<abi>`
 if present + executable, else the JS shim) → **`chmod +x`** the picked
-binaries → **start the foreground service** → **spawn**
-`node opencode.bundle.js serve --port 4096` (exec'd as a real process via
+binaries → **start the foreground service** → **spawn** the opencode
+server (`node opencode.bundle.js`, serve mode, internal port 4097) and the
+OpenAI-compat adapter (`node lib/oagents-compat.mjs`, app-facing 4096)
+(exec'd as real processes via
 ProcessBuilder with `LD_LIBRARY_PATH=filesDir/toolbox/lib/<device-abi>`,
 plus `PATH`, `NODE_PATH`, `npm_config_prefix`, `HOME`, and
 `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD` env set) → **poll `/health`** (max ~25s)

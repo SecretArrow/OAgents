@@ -1162,13 +1162,16 @@ class AppStringsEs implements AppStrings {
   @override
   List<HelpEntry> get helpTopics => const [
     HelpEntry(
-      '1. Empezar: conectar un proveedor',
-      'Abre Ajustes → Proveedores, añade tu proveedor (OpenRouter, '
-          'InferHub, Z.AI, OpenAI, DeepSeek, Groq o cualquier endpoint '
-          'compatible con OpenAI), pega su API key y elige un modelo del '
-          'catálogo en vivo (con búsqueda y filtros incluidos). Las keys '
-          'se guardan solo en este dispositivo. Sin una key que funcione '
-          'el chat no puede responder, así que empieza aquí.',
+      '1. Empezar: añade una clave de proveedor',
+      'El runtime opencode integrado es el único backend de IA. Abre '
+          'Ajustes → opencode, añade una API key de proveedor en '
+          'Provider keys (OpenAI, Anthropic, Google, OpenRouter, Ollama o '
+          'LM Studio), inicia el runtime si no está corriendo y elige un '
+          'modelo del Model picker (Refresh models vuelve a leer la lista '
+          'en vivo). Las keys se entregan a opencode y se guardan solo en '
+          'este dispositivo — la app nunca las envía a otro sitio. Sin una '
+          'key que funcione el chat no puede responder, así que empieza '
+          'aquí.',
     ),
     HelpEntry(
       '2. Chats y tareas en segundo plano',
@@ -1291,8 +1294,9 @@ class AppStringsEs implements AppStrings {
     ),
     HelpEntry(
       '12. Consejos y solución de problemas',
-      '¿Error del proveedor? Revisa la API key y la cuota del modelo en '
-          'el panel del proveedor. ¿Un módulo falla? Usa su tarjeta de '
+      '¿Error del proveedor? Elimina y vuelve a añadir la API key en '
+          'Provider keys, y revisa la cuota del modelo en el panel del '
+          'proveedor. ¿Un módulo falla? Usa su tarjeta de '
           'reparación o vuelve a subir el ZIP. ¿Red inestable? El '
           'reintento automático con la guarda de modo avión se reanuda '
           'con seguridad. ¿El texto en streaming parece atascado? Espera '
@@ -1891,7 +1895,7 @@ class AppStringsEs implements AppStrings {
 
   // -- Assistant polish (v1.54.0) ------------------------------------------
   @override
-  String get errorOpenProviders => 'Abrir Proveedores';
+  String get errorOpenProviders => 'Abrir opencode';
   @override
   String get spanishOption => 'Español';
 

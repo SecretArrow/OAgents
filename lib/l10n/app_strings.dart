@@ -858,8 +858,9 @@ abstract class AppStrings {
   String get ollamaExportNone;
 
   // -- Assistant polish (v1.54.0) ------------------------------------------
-  /// Error dialog: action button that jumps to the Providers screen for
-  /// auth/config failures (401/403, invalid or missing API key).
+  /// Error dialog: action button that jumps to the opencode setup screen
+  /// (where Provider keys live) for auth/config failures (401/403,
+  /// invalid or missing API key).
   String get errorOpenProviders;
 
   /// Settings language picker: Spanish native name (identical in every
@@ -2015,13 +2016,15 @@ class AppStringsEn implements AppStrings {
   @override
   List<HelpEntry> get helpTopics => const [
     HelpEntry(
-      '1. Get started: connect a provider',
-      'Open Settings → Providers, add your provider (OpenRouter, '
-          'InferHub, Z.AI, OpenAI, DeepSeek, Groq, or any OpenAI-compatible '
-          'endpoint), paste its API key and pick a model from the live '
-          'catalog (search and filters included). Keys are stored only on '
-          'this device. Without a working key the chat cannot answer, so '
-          'start here.',
+      '1. Get started: add a provider key',
+      'The embedded opencode runtime is the sole AI backend. Open '
+          'Settings → opencode, add a provider API key under Provider '
+          'keys (OpenAI, Anthropic, Google, OpenRouter, Ollama or LM '
+          'Studio), start the runtime if it is not running, then pick a '
+          'model from the Model picker (Refresh models re-reads the live '
+          'list). Keys are handed to opencode and stored only on this '
+          'device — the app never sends them anywhere else. Without a '
+          'working key the chat cannot answer, so start here.',
     ),
     HelpEntry(
       '2. Chats and background tasks',
@@ -2133,8 +2136,9 @@ class AppStringsEn implements AppStrings {
     ),
     HelpEntry(
       '12. Tips and troubleshooting',
-      'Provider error? Re-check the API key and the model\'s quota in '
-          'the provider dashboard. A module misbehaving? Use its repair '
+      'Provider error? Delete and re-add the API key under Provider '
+          'keys, and check the model\'s quota in the provider dashboard. '
+          'A module misbehaving? Use its repair '
           'card or re-upload the zip. Unstable network? Auto-retry with '
           'the airplane-mode guard resumes safely. Streaming text looks '
           'stuck? Wait or press Stop — the transcript is saved after '
@@ -2714,7 +2718,7 @@ class AppStringsEn implements AppStrings {
 
   // -- Assistant polish (v1.54.0) ------------------------------------------
   @override
-  String get errorOpenProviders => 'Open Providers';
+  String get errorOpenProviders => 'Open opencode';
   @override
   String get spanishOption => 'Español';
 
@@ -3895,13 +3899,16 @@ class AppStringsId implements AppStrings {
   @override
   List<HelpEntry> get helpTopics => const [
     HelpEntry(
-      '1. Mulai: hubungkan provider',
-      'Buka Pengaturan → Providers, tambahkan provider Anda '
-          '(OpenRouter, InferHub, Z.AI, OpenAI, DeepSeek, Groq, atau '
-          'endpoint OpenAI-compatible apa pun), tempel API key-nya dan '
-          'pilih model dari katalog live (lengkap dengan pencarian dan '
-          'filter). Key hanya tersimpan di perangkat ini. Tanpa key yang '
-          'berfungsi chat tidak bisa menjawab, jadi mulai dari sini.',
+      '1. Mulai: tambahkan kunci provider',
+      'Runtime opencode tertanam adalah satu-satunya backend AI. Buka '
+          'Pengaturan → opencode, tambahkan API key provider di bawah '
+          'Provider keys (OpenAI, Anthropic, Google, OpenRouter, Ollama '
+          'atau LM Studio), mulai runtime bila belum berjalan, lalu '
+          'pilih model dari Model picker (Refresh models membaca ulang '
+          'daftar live). Key diserahkan ke opencode dan hanya tersimpan '
+          'di perangkat ini — aplikasi tidak pernah mengirimkannya ke '
+          'tempat lain. Tanpa key yang berfungsi chat tidak bisa '
+          'menjawab, jadi mulai dari sini.',
     ),
     HelpEntry(
       '2. Chat dan tugas latar belakang',
@@ -4017,8 +4024,9 @@ class AppStringsId implements AppStrings {
     ),
     HelpEntry(
       '12. Tips dan pemecahan masalah',
-      'Provider error? Periksa ulang API key dan kuota model di '
-          'dashboard penyedia. Modul bermasalah? Pakai kartu perbaikannya '
+      'Provider error? Hapus dan tambahkan ulang API key di bawah '
+          'Provider keys, dan periksa kuota model di dashboard '
+          'penyedia. Modul bermasalah? Pakai kartu perbaikannya '
           'atau unggah ulang zip. Jaringan tidak stabil? Auto-retry '
           'dengan penjaga mode pesawat melanjutkan dengan aman. Teks '
           'streaming terasa macet? Tunggu atau tekan Stop — transkrip '
@@ -4605,7 +4613,7 @@ class AppStringsId implements AppStrings {
 
   // -- Assistant polish (v1.54.0) ------------------------------------------
   @override
-  String get errorOpenProviders => 'Buka Providers';
+  String get errorOpenProviders => 'Buka opencode';
   @override
   String get spanishOption => 'Español';
 

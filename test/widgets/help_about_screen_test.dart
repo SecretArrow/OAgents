@@ -29,7 +29,7 @@ void main() {
         expect(find.byKey(Key('help-topic-$i')), findsOneWidget);
       }
       // Only the first topic starts expanded; its body text is visible.
-      expect(find.textContaining('connect a provider'), findsOneWidget);
+      expect(find.textContaining('add a provider key'), findsOneWidget);
       // Collapsed topics keep their titles reachable by scrolling.
       expect(find.textContaining('12. Tips'), findsWidgets);
     });
@@ -66,7 +66,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Bantuan'), findsOneWidget);
       expect(
-        find.textContaining('1. Mulai: hubungkan provider'),
+        find.textContaining('1. Mulai: tambahkan kunci provider'),
         findsOneWidget,
       );
     });

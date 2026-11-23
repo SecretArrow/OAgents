@@ -4,21 +4,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../di.dart';
-import '../../l10n/app_strings.dart';
 import '../../models/models.dart';
 import '../../services/opencode_client.dart';
 import '../../services/opencode_runtime.dart';
 import '../../services/toolbox_manifest.dart';
+import 'provider_credentials_screen.dart';
 
 /// Replaces the old Providers + Ollama Manage screens.
 ///
 /// OAgents has exactly one AI backend: the opencode CLI embedded inside the
 /// app. This screen is the single place where the user sees that backend's
-/// state and picks which model it should route to. There is no provider
-/// list, no API-key field and no server URL field here — opencode runs
-/// locally on [embeddedOpencodeUrl] and its OWN provider auth (OpenAI /
-/// Anthropic / ... API keys) is configured through opencode's standard
-/// auth flow, not through this app's settings.
+/// state and picks which model it should route to. opencode runs locally
+/// on [embeddedOpencodeUrl]; its OWN provider auth (OpenAI / Anthropic /
+/// ... API keys) is configured in-app through [ProviderCredentialsScreen],
+/// reachable from the "Provider keys" card below — no terminal needed.
 class OpencodeSetupScreen extends ConsumerStatefulWidget {
   const OpencodeSetupScreen({super.key});
 
@@ -34,6 +33,7 @@ class _OpencodeSetupScreenState extends ConsumerState<OpencodeSetupScreen> {
   bool _loadingModels = false;
   String? _modelsError;
   ToolboxManifest? _manifest;
+  List<OpencodeCredential> _credentials = const <OpencodeCredential>[];
 
   @override
   void initState() {
@@ -49,6 +49,38 @@ class _OpencodeSetupScreenState extends ConsumerState<OpencodeSetupScreen> {
     });
     if (_status.isReady) _loadModels();
     unawaited(_loadManifest());
+    unawaited(_loadCredentials());
+  }
+
+  /// Credential summary for the "Provider keys" card. Loaded whenever the
+  /// screen appears AND after the user returns from the credentials
+  /// screen, so the "N keys" row never goes stale.
+  Future<void> _loadCredentials() async {
+    try {
+      final credentials = await ref
+          .read(opencodeClientProvider)
+          .listCredentials(serverUrl: embeddedOpencodeUrl);
+      if (!mounted) return;
+      setState(() => _credentials = credentials);
+    } catch (_) {
+      // The summary row degrades to "No keys — add one"; the credentials
+      // screen owns the real error/retry surface.
+    }
+  }
+
+  /// Opens the credential manager. On return, the model catalog and the
+  /// key summary are re-fetched — the server swaps model availability
+  /// with every credential create/activate/delete (per-contract: no
+  /// keys → 10 models, one openai key → 82).
+  Future<void> _openCredentials() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const ProviderCredentialsScreen(),
+      ),
+    );
+    if (!mounted) return;
+    await _loadCredentials();
+    await _loadModels();
   }
 
   Future<void> _loadManifest() async {
@@ -104,7 +136,6 @@ class _OpencodeSetupScreenState extends ConsumerState<OpencodeSetupScreen> {
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(settingsProvider);
-    final strings = appStringsFor(settings.languageCode);
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('opencode')),
@@ -154,7 +185,11 @@ class _OpencodeSetupScreenState extends ConsumerState<OpencodeSetupScreen> {
             style: theme.textTheme.bodySmall,
           ),
           const SizedBox(height: 24),
-          _AuthNote(theme: theme, strings: strings),
+          _ProviderKeysCard(
+            credentials: _credentials,
+            onManage: _openCredentials,
+            theme: theme,
+          ),
           const SizedBox(height: 16),
           _ToolboxCard(manifest: _manifest, theme: theme),
         ],
@@ -288,8 +323,8 @@ class _ModelPicker extends StatelessWidget {
           dropdown,
           const SizedBox(height: 4),
           Text(
-            'No models advertised by opencode yet — configure opencode’s '
-            'provider auth (`opencode auth login`) and refresh.',
+            'No models yet — add a provider API key under Provider keys, '
+            'then refresh.',
             style: theme.textTheme.bodySmall,
           ),
         ],
@@ -299,41 +334,86 @@ class _ModelPicker extends StatelessWidget {
   }
 }
 
-class _AuthNote extends StatelessWidget {
-  const _AuthNote({required this.theme, required this.strings});
+/// "Provider keys" — the in-app provider credential summary. Replaces the
+/// old _AuthNote, which told users to run `opencode auth login` from a
+/// terminal that does not exist in this app; opencode's credential API is
+/// now managed by [ProviderCredentialsScreen] instead. The card shows a
+/// one-line summary ("N keys, M active providers" / "No keys — add one")
+/// with a Manage button that pushes that screen; on return the caller
+/// re-fetches the model catalog (the server swaps model availability with
+/// every credential change).
+class _ProviderKeysCard extends StatelessWidget {
+  const _ProviderKeysCard({
+    required this.credentials,
+    required this.onManage,
+    required this.theme,
+  });
+
+  final List<OpencodeCredential> credentials;
+  final VoidCallback onManage;
   final ThemeData theme;
-  final AppStrings strings;
 
   @override
   Widget build(BuildContext context) {
+    final int activeProviders = <String>{
+      for (final c in credentials)
+        if (c.active) c.integrationID,
+    }.length;
+    final int keyCount = credentials.length;
+    final String summary = keyCount == 0
+        ? 'No keys — add one'
+        : '$keyCount ${keyCount == 1 ? 'key' : 'keys'}, '
+              '$activeProviders active '
+              '${activeProviders == 1 ? 'provider' : 'providers'}';
     return Card(
       color: theme.colorScheme.surfaceContainerHighest,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Row(
-              children: <Widget>[
-                Icon(
-                  Icons.info_outline,
-                  size: 20,
-                  color: theme.colorScheme.primary,
-                ),
-                const SizedBox(width: 8),
-                Text('Provider auth', style: theme.textTheme.titleSmall),
-              ],
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'opencode talks to its own model providers (OpenAI, Anthropic, '
-              'etc.) using credentials it manages itself. Run '
-              '`opencode auth login` from the app’s opencode terminal once, '
-              'then the embedded runtime picks them up automatically. '
-              'OAgents never stores these keys.',
-              style: theme.textTheme.bodyMedium,
-            ),
-          ],
+      child: InkWell(
+        onTap: onManage,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  Icon(
+                    Icons.vpn_key_outlined,
+                    size: 20,
+                    color: theme.colorScheme.primary,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text('Provider keys', style: theme.textTheme.titleSmall),
+                  ),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    size: 20,
+                    color: theme.colorScheme.outline,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(summary, style: theme.textTheme.bodyMedium),
+              const SizedBox(height: 8),
+              Text(
+                'opencode talks to OpenAI, Anthropic, Google, OpenRouter and '
+                'friends with keys stored by the embedded server itself — '
+                'OAgents never keeps them. Add or activate a key to unlock '
+                'that provider’s models.',
+                style: theme.textTheme.bodySmall,
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: <Widget>[
+                  OutlinedButton(
+                    onPressed: onManage,
+                    child: const Text('Manage'),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );

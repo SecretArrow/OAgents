@@ -91,7 +91,7 @@ flowchart TD
     BRIDGE["OpencodeRuntimeBridge<br/>(Kotlin platform channel)<br/>android/.../OpencodeRuntimeBridge.kt"]
     TOOLBOX["Node toolbox<br/>filesDir/toolbox/<br/>(opencode.bundle.js + node_modules<br/>+ node/&lt;abi&gt; + agent-browser&lt;abi&gt;/-js)"]
     SVC["OAgentsForegroundService<br/>(keep-alive + wake lock)"]
-    OPC["opencode runtime<br/>(auth, models, MCP, agent tools)<br/>node opencode.bundle.js serve --port 4096"]
+    OPC["opencode runtime<br/>(auth, models, MCP, agent tools)<br/>server: node opencode.bundle.js (serve, :4097)<br/>+ OpenAI-compat adapter :4096"]
 
     UI --> LOOP
     LOOP --> CFG --> CLIENT
@@ -102,7 +102,7 @@ flowchart TD
     BRIDGE -- "start / stop" --> SVC
     SVC -- "keep-alive" --> OPC
     BRIDGE -- "status events" .-> UI
-    TOOLBOX -- "node opencode.bundle.js serve<br/>NODE_PATH=toolbox/lib/node_modules<br/>PATH=toolbox/bin:$PATH" --> OPC
+    TOOLBOX -- "node opencode.bundle.js (serve) + node lib/oagents-compat.mjs<br/>NODE_PATH=toolbox/lib/node_modules<br/>PATH=toolbox/bin:$PATH" --> OPC
 ```
 
 Data flow for a chat turn:
@@ -115,11 +115,13 @@ Data flow for a chat turn:
 3. `OpencodeClient` POSTs to `/chat/completions` and consumes the SSE
    stream — assistant text deltas, tool-call deltas, a final usage chunk,
    and `[DONE]`.
-4. On the other side of the loopback socket sits the opencode process,
-   spawned by the Kotlin `OpencodeRuntimeBridge` as
-   `node opencode.bundle.js serve --port 4096` inside the extracted
-   `filesDir/toolbox/` tree, under a per-ABI Node runtime, kept alive by an
-   Android foreground service. `NODE_PATH=toolbox/lib/node_modules` is set
+4. On the other side of the loopback socket sit the two opencode
+   processes, spawned by the Kotlin `OpencodeRuntimeBridge` inside the
+   extracted `filesDir/toolbox/` tree under a per-ABI Node runtime, kept
+   alive by an Android foreground service: the opencode server (serve mode,
+   internal port 4097) and the OpenAI-compat adapter
+   `node lib/oagents-compat.mjs` on the app-facing `4096` that proxies to
+   it. `NODE_PATH=toolbox/lib/node_modules` is set
    in the spawn env so every curated package (`ethers`, `web3`, `viem`,
    `playwright-core`, …) resolves without per-script install.
 
@@ -157,7 +159,17 @@ toolbox/
     node_modules/         pre-installed packages the embedded opencode runtime
                           AND chat modules can require() with no per-script
                           install. Curated set (see below).
-    opencode.bundle.js    opencode CLI source bundled into one Node-runnable file.
+    opencode.bundle.js    CJS launcher: injects serve mode argv/env and
+                          dynamic-imports the ESM bundle.
+    opencode.bundle.mjs  opencode CLI source bundled into one Node-runnable
+                          ESM file (Bun-isms patched post-build).
+    oagents-compat.mjs   OpenAI-compat adapter the app's Dart client talks
+                          to; listens on 4096 and proxies to the opencode
+                          server on the internal port.
+    bun_shim.cjs         Node implementations of the Bun.* surface upstream
+                          opencode expects; loaded before the bundle.
+    install-module.mjs   dynamic module installer for `npm install -g`
+                          into the toolbox prefix.
     package.json          opencode's package.json (for the require graph).
   modules.json            CI-generated manifest of every bundled package +
                          version, categorized (crypto / dev / browser). Read
@@ -228,23 +240,32 @@ Gone from the ZAgents codebase, with no replacement:
 - The `providers/`, `ollama/`, `node/`, and `preset-editor` screens.
 
 What replaces them is not a new provider: it is the embedded opencode CLI,
-which manages its **own** provider auth (see [Setup](#setup)).
+which manages its **own** provider auth (see [Setup](#setup) — keys are
+added in-app under the setup screen's **Provider keys** card).
 
 ---
 
 ## Setup
 
+Since v1.0.4 the embedded opencode actually boots: `start` spawns the
+opencode server (serve mode) plus a small OpenAI-compatible adapter on
+the on-device loopback endpoint (`http://127.0.0.1:4096`), and chat works
+end to end once a provider API key is added.
+
 OAgents itself stores **no API keys**. The app ↔ opencode hop is loopback
 inside the app sandbox and needs no auth. Provider credentials (OpenAI /
 Anthropic / … API keys) are opencode's own concern and live in opencode's
-own auth file inside the app's private storage, managed by opencode's
-standard auth flow — never inside OAgents' settings.
+own local auth database inside the app's private storage — never inside
+OAgents' settings.
 
 To configure provider auth:
 
 1. Open OAgents → **Settings → opencode** (the opencode setup screen).
-2. The setup screen surfaces opencode's auth flow. Run
-   `opencode auth login` from the app's opencode terminal once, then refresh.
+2. Add a provider API key under the setup screen's **Provider keys**
+   card (OpenAI, Anthropic, Google, OpenRouter, Ollama, LM Studio — see
+   [`docs/PROVIDER_KEYS.md`](docs/PROVIDER_KEYS.md)). The keys are handed
+   to the embedded opencode runtime and stored in its local database;
+   OAgents never sends them anywhere else.
 3. Pick which model opencode should route to from the **Model** picker
    (fed by `GET /models` on the loopback endpoint).
 
@@ -278,7 +299,9 @@ CI, under `.github/workflows/`:
     ×3, npm, npx, agent-browser-js, agent-browser-<abi>?}`,
     `lib/{<abi>/*.so ×3, node_modules/(curated + opencode bundle +
     package.json)}`, `modules.json`, `version.txt`. The esbuild
-    `opencode.bundle.js`, the curated `lib/node_modules` of crypto / dev /
+    `opencode.bundle.js` launcher (plus the patched ESM bundle
+    `opencode.bundle.mjs`, the Bun shim and the OpenAI-compat adapter
+    `oagents-compat.mjs`), the curated `lib/node_modules` of crypto / dev /
     browser deps via `npm install --omit=dev`, the CI-generated
     `modules.json`, the `agent-browser-js` shim, the per-ABI `node-<abi>`
     Termux executables + companion `.so` libs, and the `npm`/`npx` shims
@@ -287,6 +310,14 @@ CI, under `.github/workflows/`:
     staged **loose** alongside the tarball, so Dart can read them through
     `rootBundle` (via `lib/services/toolbox_manifest.dart`) and Settings →
     opencode can show the manifest + version **without launching opencode**.
+
+  Since v1.0.4 the job also runs a **blocking payload smoke** at the end:
+  it extracts the actual staged tarball (not the source tree), boots the
+  real opencode serve mode plus the compat adapter exactly like the on-device
+  bridge does, and asserts `/health`, `/models` and a chat SSE round-trip
+  (data chunks ending in `[DONE]`). The step fails the workflow, so a
+  toolbox whose serve mode does not boot can no longer ship — that is
+  exactly how the v1.0.2/v1.0.3 regression slipped through before.
 
   The "Fetch per-ABI Node.js + companion libs from Termux" step is a real,
   reproducible fetcher (not best-effort). For each Android ABI
@@ -376,10 +407,12 @@ network and no real opencode runtime.
 
 ## Security
 
-- **No credentials in this app.** OAgents stores no provider API keys. The
-  app ↔ opencode hop is loopback (`127.0.0.1:4096`) inside the app sandbox
-  and carries no auth token; opencode manages its own provider auth in its
-  own private storage.
+- **No credentials in this app.** Provider API keys added through the
+  **Provider keys** card are handed to the embedded opencode runtime and
+  live only in opencode's own local auth database inside the app's private
+  storage — OAgents' settings store none. The app ↔ opencode hop is
+  loopback (`127.0.0.1:4096`) inside the app sandbox and carries no auth
+  token.
 - **`OAGENTS_CI_TOKEN`.** The auto-fix job (in `ci.yml`) and the release
   job (in `release.yml`) use a `OAGENTS_CI_TOKEN` GitHub Secret to push
   fixes/tags back to the repo. It lives **only** in GitHub Secrets and is
@@ -505,6 +538,7 @@ OAgents/
 ├── android/app/src/main/jniLibs/          # empty (.gitkeep); no .so shipped — node runtime lives in toolbox.tar.gz
 ├── docs/
 │   ├── architecture.md                # HTTP + platform channel + toolbox + state machine
+│   ├── PROVIDER_KEYS.md               # in-app provider API key management guide
 │   └── modules/                       # module SDK reference (en + id)
 ├── integration_test/e2e_test.dart     # hermetic E2E with in-process doubles
 ├── test/                              # unit + widget tests, mock opencode server

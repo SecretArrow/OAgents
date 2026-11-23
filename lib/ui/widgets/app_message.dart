@@ -27,7 +27,7 @@ import '../../l10n/app_strings.dart';
 ///   user must acknowledge should not vanish on its own;
 /// - the OK button (and the barrier tap) dismiss immediately;
 /// - v1.54.0: [actionLabel] + [onAction] render an extra TextButton
-///   BEFORE OK (e.g. "Open Providers" for auth failures). The action
+///   BEFORE OK (e.g. "Open opencode" for auth failures). The action
 ///   runs after the dialog closes; when either is null the dialog is
 ///   byte-for-byte the old single-button one for every existing caller.
 void showAppMessage(
@@ -108,7 +108,7 @@ class _AppMessageCard extends StatefulWidget {
   final String message;
   final bool error;
 
-  /// v1.54.0 — optional action button next to OK (e.g. "Open Providers"
+  /// v1.54.0 — optional action button next to OK (e.g. "Open opencode"
   /// for auth failures). BOTH [actionLabel] and [onAction] must be
   /// non-null for the button to render; null keeps the old
   /// single-button behavior everywhere else.

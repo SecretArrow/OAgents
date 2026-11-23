@@ -62,6 +62,39 @@ class OpencodeModel {
   String toString() => name.isEmpty ? id : '$id ($name)';
 }
 
+/// One provider credential stored by the opencode server
+/// (`GET/POST /api/credential`). Only the non-secret metadata is kept —
+/// the API key itself is never parsed out of `value` and never held in
+/// app memory beyond the moment it is POSTed.
+class OpencodeCredential {
+  const OpencodeCredential({
+    required this.id,
+    required this.integrationID,
+    this.label = 'default',
+    this.active = false,
+  });
+
+  final String id;
+  final String integrationID;
+  final String label;
+  final bool active;
+
+  /// Defensive parse of a `data` row: unknown shapes degrade to empty
+  /// strings instead of throwing (same posture as [OpencodeModel.fromJson]
+  /// over the wire formats the embedded server actually returns).
+  factory OpencodeCredential.fromJson(Map<String, dynamic> json) =>
+      OpencodeCredential(
+        id: (json['id'] ?? '').toString(),
+        integrationID: (json['integrationID'] ?? '').toString(),
+        label: (json['label'] ?? 'default').toString(),
+        active: json['active'] is bool ? json['active'] as bool : false,
+      );
+
+  @override
+  String toString() =>
+      'OpencodeCredential($integrationID, label=$label, active=$active)';
+}
+
 /// Thrown when the opencode server cannot be reached or returns a
 /// non-2xx response that is not a normal SSE error event.
 class OpencodeHttpException implements Exception {
@@ -140,6 +173,177 @@ class OpencodeClient {
           .toList();
     } catch (_) {
       return const <OpencodeModel>[];
+    } finally {
+      if (owns) client.close();
+    }
+  }
+
+  /// Lists provider credentials stored by the opencode server
+  /// (`GET /api/credential` → `{"data":[Credential,...]}`). The embedded
+  /// compat adapter on [serverUrl] proxies the `/api/*` surface verbatim,
+  /// so this speaks opencode's own protocol directly. Never throws — a
+  /// failure degrades to an empty list (the credentials screen keeps its
+  /// own retry surface; [listModels] behaves the same way).
+  Future<List<OpencodeCredential>> listCredentials({
+    required String serverUrl,
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
+    final Uri? uri = Uri.tryParse('${serverUrl.trim()}/api/credential');
+    if (uri == null) return const <OpencodeCredential>[];
+    final http.Client client = _client();
+    final bool owns = _injected == null;
+    try {
+      final http.Response res = await client
+          .get(uri, headers: const <String, String>{})
+          .timeout(timeout);
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        return const <OpencodeCredential>[];
+      }
+      final dynamic decoded = jsonDecode(res.body);
+      final List<dynamic> data = (decoded is Map && decoded['data'] is List)
+          ? decoded['data'] as List<dynamic>
+          : (decoded is List ? decoded : const <dynamic>[]);
+      return data
+          .whereType<Map<String, dynamic>>()
+          .map(OpencodeCredential.fromJson)
+          .where((c) => c.id.isNotEmpty)
+          .toList();
+    } catch (_) {
+      return const <OpencodeCredential>[];
+    } finally {
+      if (owns) client.close();
+    }
+  }
+
+  /// Stores one provider API key on the opencode server
+  /// (`POST /api/credential`). The key travels inside the `value` union
+  /// (`{"type":"key","key":...}`) and is only ever sent over the loopback
+  /// adapter — it never touches app storage. Returns the created
+  /// [OpencodeCredential] (server-generated `cred_...` id included) so the
+  /// UI can refresh the list without a re-fetch.
+  ///
+  /// [activate] mirrors the server's exclusive-activation rule: with
+  /// `true` (the default) the new key becomes THE active credential for
+  /// [integrationID] and every other key of that provider flips to
+  /// inactive.
+  Future<OpencodeCredential> createCredential({
+    required String serverUrl,
+    required String integrationID,
+    required String apiKey,
+    String label = 'default',
+    bool activate = true,
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
+    final String base = serverUrl.trim().replaceAll(RegExp(r'/+$'), '');
+    final Uri uri = Uri.parse('$base/api/credential');
+    final Map<String, dynamic> body = <String, dynamic>{
+      'integrationID': integrationID,
+      'value': <String, dynamic>{'type': 'key', 'key': apiKey},
+      'label': label,
+      'activate': activate,
+    };
+    final http.Client client = _client();
+    final bool owns = _injected == null;
+    try {
+      final http.Response res = await client
+          .post(
+            uri,
+            headers: const <String, String>{
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode(body),
+          )
+          .timeout(timeout);
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        final String provider = integrationID.isEmpty ? 'key' : integrationID;
+        throw OpencodeHttpException(
+          'Could not save $provider key: ${_truncate(res.body, 300)}',
+          statusCode: res.statusCode,
+        );
+      }
+      final dynamic decoded = jsonDecode(res.body);
+      final dynamic data = decoded is Map ? decoded['data'] : null;
+      if (data is Map<String, dynamic>) {
+        return OpencodeCredential.fromJson(data);
+      }
+      // 2xx without a parseable `data` envelope — the server accepted the
+      // key, so report it with the values we sent rather than failing.
+      return OpencodeCredential(
+        id: '',
+        integrationID: integrationID,
+        label: label,
+        active: activate,
+      );
+    } catch (e) {
+      if (e is OpencodeHttpException) rethrow;
+      throw OpencodeHttpException(
+        'Could not reach opencode server to save key: $e',
+      );
+    } finally {
+      if (owns) client.close();
+    }
+  }
+
+  /// Removes a credential (`DELETE /api/credential/{id}` → 204). Safe to
+  /// call for an id the server already forgot — the endpoint answers 204
+  /// either way (idempotent no-op style).
+  Future<void> deleteCredential({
+    required String serverUrl,
+    required String id,
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
+    final String base = serverUrl.trim().replaceAll(RegExp(r'/+$'), '');
+    final Uri uri = Uri.parse('$base/api/credential/$id');
+    final http.Client client = _client();
+    final bool owns = _injected == null;
+    try {
+      final http.Response res = await client
+          .delete(uri, headers: const <String, String>{})
+          .timeout(timeout);
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        throw OpencodeHttpException(
+          'Could not delete key: ${_truncate(res.body, 300)}',
+          statusCode: res.statusCode,
+        );
+      }
+    } catch (e) {
+      if (e is OpencodeHttpException) rethrow;
+      throw OpencodeHttpException(
+        'Could not reach opencode server to delete key: $e',
+      );
+    } finally {
+      if (owns) client.close();
+    }
+  }
+
+  /// Makes a credential THE active one for its provider
+  /// (`POST /api/credential/{id}/activate` → 204). Activation is exclusive
+  /// per `integrationID` on the server side: this call also flips every
+  /// other key of the same provider to inactive.
+  Future<void> activateCredential({
+    required String serverUrl,
+    required String id,
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
+    final String base = serverUrl.trim().replaceAll(RegExp(r'/+$'), '');
+    final Uri uri = Uri.parse('$base/api/credential/$id/activate');
+    final http.Client client = _client();
+    final bool owns = _injected == null;
+    try {
+      final http.Response res = await client
+          .post(uri, headers: const <String, String>{})
+          .timeout(timeout);
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        throw OpencodeHttpException(
+          'Could not activate key: ${_truncate(res.body, 300)}',
+          statusCode: res.statusCode,
+        );
+      }
+    } catch (e) {
+      if (e is OpencodeHttpException) rethrow;
+      throw OpencodeHttpException(
+        'Could not reach opencode server to activate key: $e',
+      );
     } finally {
       if (owns) client.close();
     }

@@ -12,6 +12,11 @@
 //   POST /chat/completions   -> opencode POST /api/session + /prompt, then
 //                               /api/event SSE -> OpenAI chunk stream
 //   POST /v1/chat/completions (same handler)
+//   ANY  /api/*               -> proxied VERBATIM to the upstream opencode
+//                               server (the Dart setup UI talks opencode's
+//                               own protocol — /api/credential, /api/model,
+//                               /api/provider — directly through this port)
+//   GET  /openapi.json        -> same passthrough (diagnostics only)
 //
 // Env:
 //   PORT       listening port for the app (default 4096 — bridge/UI expect it)
@@ -160,6 +165,45 @@ async function chat(req, res, body) {
   finish()
 }
 
+// ---------------------------------------------------------------------------
+// Generic /api/* passthrough — the Dart setup UI speaks opencode's own
+// protocol (credentials, models, providers) directly against this port, so
+// the adapter forwards those requests VERBATIM instead of re-modeling them
+// (a hand-rolled mapping would drift from the /api/* schema the upstream
+// bundle actually serves). /openapi.json rides along for diagnostics.
+// ---------------------------------------------------------------------------
+async function proxy(req, res, path, query) {
+  // Collect the client's body first: fetch needs the full payload up front
+  // (no streaming upload), and the body is required to size content-type.
+  const chunks = []
+  for await (const c of req) chunks.push(c)
+  const body = Buffer.concat(chunks)
+  const headers = {
+    authorization: UP_AUTH, // upstream only accepts the Basic pair
+    "content-type": req.headers["content-type"] || (body.length ? "application/json" : undefined),
+    accept: req.headers.accept || "*/*",
+  }
+  try {
+    const r = await fetch(UP + path + query, {
+      method: req.method,
+      headers,
+      body: body.length ? body : undefined,
+      redirect: "manual", // 3xx must reach the client as-is, not be followed
+    })
+    // Stream the upstream body through verbatim: status code and
+    // content-type are preserved, everything else stays untouched.
+    res.writeHead(r.status, { "content-type": r.headers.get("content-type") || "application/octet-stream" })
+    if (r.body) for await (const c of r.body) res.write(c)
+    res.end()
+  } catch (e) {
+    // ECONNREFUSED while the app is still booting the opencode server —
+    // surface a clean 503 so the UI can retry instead of parsing a hang.
+    log(`proxy ${req.method} ${path} upstream unreachable: ${e?.cause?.code ?? e?.message ?? e}`)
+    res.writeHead(503, { "content-type": "application/json" })
+    res.end(JSON.stringify({ error: { message: "opencode server not reachable" } }))
+  }
+}
+
 /**
  * Drives one opencode round: create a session, post the prompt, then
  * stream text parts off the /api/event bus until the session goes idle
@@ -300,6 +344,15 @@ const server = http.createServer(async (req, res) => {
     let parsed = {}
     try { parsed = JSON.parse(body) } catch {}
     return chat(req, res, parsed)
+  }
+  // Opencode-protocol passthrough. Exact-path routes above stay matched
+  // FIRST (the OpenAI surface wins over the raw /api surface), then any
+  // remaining /api/* route — and /openapi.json for diagnostics — is
+  // forwarded verbatim. Anything else falls through to the 404 below.
+  if (url.startsWith("/api/") || (req.method === "GET" && url === "/openapi.json")) {
+    const raw = req.url || "/"
+    const q = raw.includes("?") ? raw.slice(raw.indexOf("?")) : ""
+    return proxy(req, res, url, q)
   }
   res.writeHead(404, { "content-type": "application/json" })
   res.end(JSON.stringify({ error: { message: `no route ${req.method} ${url}` } }))
