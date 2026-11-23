@@ -248,9 +248,7 @@ class OpencodeClient {
       final http.Response res = await client
           .post(
             uri,
-            headers: const <String, String>{
-              'Content-Type': 'application/json',
-            },
+            headers: const <String, String>{'Content-Type': 'application/json'},
             body: jsonEncode(body),
           )
           .timeout(timeout);

@@ -384,7 +384,10 @@ class _ProviderKeysCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Text('Provider keys', style: theme.textTheme.titleSmall),
+                    child: Text(
+                      'Provider keys',
+                      style: theme.textTheme.titleSmall,
+                    ),
                   ),
                   Icon(
                     Icons.chevron_right_rounded,

@@ -412,10 +412,7 @@ class _ErrorCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
-            OutlinedButton(
-              onPressed: onRetry,
-              child: const Text('Retry'),
-            ),
+            OutlinedButton(onPressed: onRetry, child: const Text('Retry')),
           ],
         ),
       ),
@@ -479,9 +476,7 @@ class _AddKeyCard extends StatelessWidget {
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
               initialValue: provider,
-              decoration: const InputDecoration(
-                labelText: 'Provider',
-              ),
+              decoration: const InputDecoration(labelText: 'Provider'),
               items: <DropdownMenuItem<String>>[
                 for (final String p in kCredentialProviders)
                   DropdownMenuItem<String>(value: p, child: Text(p)),
