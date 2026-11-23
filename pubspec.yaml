@@ -48,6 +48,14 @@ flutter:
     - docs/modules/sdk-reference-id.md
     - assets/skills/web3-wallet-basics/SKILL.md
     - assets/skills/binance-agentic-wallet/SKILL.md
+    # Toolbox manifest read by lib/services/toolbox_manifest.dart via
+    # rootBundle. Committed as dev/CI placeholders; release.yml OVERWRITES
+    # both with the real bundle-opencode artifact files before flutter
+    # build, so release APKs expose the true bundled-module list to Dart.
+    # (The Kotlin side reads its own copy from android assets — the two
+    # asset systems are separate; rootBundle never sees android assets.)
+    - assets/toolbox/modules.json
+    - assets/toolbox/version.txt
 
 flutter_launcher_icons:
   android: true

@@ -1,0 +1,9 @@
+{
+  "generatedAt": "placeholder",
+  "nodeRuntime": "bundled-per-abi",
+  "crypto": [],
+  "dev": [],
+  "browser": [],
+  "all": [],
+  "note": "Dev/CI placeholder. The release pipeline (release.yml) OVERWRITES this file with the real bundle-opencode artifact manifest before flutter build, so release APKs ship the true bundled-module list. Committed so `flutter build` never fails on a missing declared asset."
+}

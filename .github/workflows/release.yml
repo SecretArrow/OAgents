@@ -86,7 +86,15 @@ jobs:
           cp oagents-toolbox/assets/toolbox/toolbox.tar.gz android/app/src/main/assets/toolbox/
           cp oagents-toolbox/assets/toolbox/version.txt    android/app/src/main/assets/toolbox/
           cp oagents-toolbox/assets/toolbox/modules.json   android/app/src/main/assets/toolbox/
-          ls -lh android/app/src/main/assets/toolbox/
+          # Also overwrite the Dart-side placeholders (pubspec declares
+          # assets/toolbox/{modules.json,version.txt} — lib/services/
+          # toolbox_manifest.dart reads them via rootBundle, and rootBundle
+          # never sees the android/app/src/main/assets copies). Without this
+          # the release APK would ship the committed placeholder manifest and
+          # the toolbox UI would show isPresent=false / an empty module list.
+          cp oagents-toolbox/assets/toolbox/version.txt  assets/toolbox/version.txt
+          cp oagents-toolbox/assets/toolbox/modules.json assets/toolbox/modules.json
+          ls -lh android/app/src/main/assets/toolbox/ assets/toolbox/
 
       - name: Set up Java 17 (LTS for Android/Gradle)
         # The ubuntu-26.04 runner defaults to Java 25, which Gradle 8.x can't

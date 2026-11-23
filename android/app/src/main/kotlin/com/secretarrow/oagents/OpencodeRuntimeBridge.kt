@@ -117,7 +117,11 @@ class OpencodeRuntimeBridge(private val context: Context) {
                         "manifest" -> result.success(readModulesManifest())
                         else -> result.notImplemented()
                     }
-                } catch (e: Exception) {
+                } catch (e: Throwable) {
+                    // Throwable, not Exception: a NoSuchMethodError-class bug
+                    // on this background thread must reach the Dart UI as a
+                    // failed status, never take the process down (that was
+                    // the v1.0.1 startup crash).
                     result.success(statusMap("failed", message = e.message ?: "error"))
                 }
             }
@@ -257,7 +261,7 @@ class OpencodeRuntimeBridge(private val context: Context) {
                     p.inputStream.bufferedReader().use { r ->
                         r.forEachLine { /* swallow; a future revision can tail it */ }
                     }
-                } catch (_: Exception) {
+                } catch (_: Throwable) {
                 }
             }
 
@@ -273,7 +277,9 @@ class OpencodeRuntimeBridge(private val context: Context) {
                     revision = revision,
                 ))
             }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
+            // Throwable: an Error (OOM, NoSuchMethodError, …) here must show
+            // up as a failed runtime status in the UI, not kill the process.
             emit(statusMap("failed", message = e.message ?: "start failed"))
         }
     }
@@ -444,10 +450,29 @@ class OpencodeRuntimeBridge(private val context: Context) {
 internal class TarExtractor(private val input: InputStream) {
     private val header = ByteArray(512)
 
+    /**
+     * API-24-safe readFully. InputStream.readNBytes(byte[], int, int) only
+     * exists on Android 13 (API 33)+ and this build has NO core-library
+     * desugaring — on an Android 7-12 device the first call threw
+     * NoSuchMethodError (an Error, not an Exception), which escaped start()'s
+     * catch, killed the background thread via the default uncaught handler
+     * and took the whole process down: the exact "app crashes right after
+     * opening" reported on v1.0.1. This manual loop is the fix.
+     */
+    private fun readFully(b: ByteArray, off: Int, len: Int): Int {
+        var total = 0
+        while (total < len) {
+            val n = input.read(b, off + total, len - total)
+            if (n <= 0) break
+            total += n
+        }
+        return total
+    }
+
     fun extractTo(destDir: File) {
         var longName: String? = null
         while (true) {
-            val read = input.readNBytes(header, 0, 512)
+            val read = readFully(header, 0, 512)
             if (read < 512 || isZeroBlock(header)) break
             var name = longName
             longName = null
@@ -465,10 +490,10 @@ internal class TarExtractor(private val input: InputStream) {
                 "././@LongLink", "././@PaxHeader" -> {
                     // Next entry's real name is in this body.
                     val buf = ByteArray(size.toInt())
-                    input.readNBytes(buf, 0, size.toInt())
+                    readFully(buf, 0, size.toInt())
                     // skip padding
                     val pad = (padded - size).toInt()
-                    if (pad > 0) input.readNBytes(ByteArray(pad), 0, pad)
+                    if (pad > 0) skipFully(pad)
                     longName = String(buf).trimEnd(0.toChar(), '\u0000')
                     continue
                 }
@@ -477,14 +502,14 @@ internal class TarExtractor(private val input: InputStream) {
             if (typeFlag == '5' || name.endsWith("/")) {
                 // Directory entry — ensure it exists, then move on.
                 File(destDir, name).mkdirs()
-                if (padded > 0) input.readNBytes(ByteArray(padded.toInt()), 0, padded.toInt())
+                if (padded > 0) skipFully(padded.toInt())
                 continue
             }
             if (typeFlag == '2') {
                 // Symlink — skip the body (we cannot materialize symlinks
                 // reliably across Android storage); node_modules symlinks
                 // are rare and the npm install in CI dedupes them.
-                if (padded > 0) input.readNBytes(ByteArray(padded.toInt()), 0, padded.toInt())
+                if (padded > 0) skipFully(padded.toInt())
                 continue
             }
             // Regular file ('0' or '\u0000').
@@ -495,7 +520,22 @@ internal class TarExtractor(private val input: InputStream) {
             }
             // Skip any remaining padding within the last 512 block.
             val pad = (padded - size).toInt()
-            if (pad > 0) input.readNBytes(ByteArray(pad), 0, pad)
+            if (pad > 0) skipFully(pad)
+        }
+    }
+
+    /**
+     * Reads and discards exactly n bytes (tar padding), buffer-sized, so a
+     * corrupt stream cannot make us allocate a huge array up front.
+     */
+    private fun skipFully(n: Int) {
+        var remaining = n
+        val buf = ByteArray(64 * 1024)
+        while (remaining > 0) {
+            val toRead = minOf(remaining, buf.size)
+            val got = input.read(buf, 0, toRead)
+            if (got <= 0) break
+            remaining -= got
         }
     }
 
