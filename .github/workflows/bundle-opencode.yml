@@ -172,8 +172,16 @@ jobs:
           // bundle (opencode.bundle.mjs) dispatches on process.argv —
           // no args means interactive TUI. This launcher injects the
           // serve argv first so running it boots the headless HTTP
-          // server on $PORT (4096), which the bridge polls via
-          // GET /health.
+          // server on $PORT (4097), which the oagents-compat adapter
+          // proxies on 4096 for the app.
+          //
+          // bun_shim.cjs MUST load before the bundle: upstream opencode
+          // targets Bun and the node bundle still holds lazy Bun.*
+          // references — the first one throws a swallowed ReferenceError
+          // and serve hangs forever with zero output (sandbox-diagnosed
+          // 2026-11-23; see .github/toolbox/patch-bundle.py).
+          import { createRequire } from 'node:module'
+          createRequire(import.meta.url)('./bun_shim.cjs')
           if (process.env.OPENCODE_SERVE === '1') {
             if (!process.argv.includes('serve')) process.argv.push('serve')
             if (process.env.PORT && !process.argv.includes(process.env.PORT)) {
@@ -188,38 +196,29 @@ jobs:
           await import('./opencode.bundle.mjs')
           EOF
 
-      - name: Smoke-test the bundle (CLI + serve + /health)
-        # The bundle must actually run before it ships in the artifact:
-        #   1. `--version` proves the ESM bundle executes under plain node;
-        #   2. serve mode must answer GET /health within 60s (the Kotlin
-        #      bridge waits 25s; CI allows more for cold start on emulated
-        #      disk). Runs against the checked-out source tree so the lazy
-        #      externals (node-pty etc.) resolve from opencode-src's
-        #      node_modules.
+      - name: Patch the node bundle for the toolbox Node runtime
+        # Upstream opencode targets Bun; the payload runs on the toolbox's
+        # Termux Node. patch-bundle.py fixes the Bun-isms that break boot on
+        # Node (import.meta.dir, self-await deadlocks, missing web-ui
+        # assets, plugin-runtime stubs). See the script header for details.
+        shell: bash
+        run: |
+          set -e
+          python3 .github/toolbox/patch-bundle.py opencode.bundle.mjs bundle-stubs
+          ls -la bundle-stubs/node_modules/effect bundle-stubs/node_modules/@opencode/plugin
+
+      - name: Smoke-test the bundle CLI
+        # `--version` proves the ESM bundle executes under plain node in the
+        # source tree (lazy externals resolve from opencode-src's
+        # node_modules). The FULL serve boot is proven later, against the
+        # actual payload tar, in "Stage final artifact layout" — the source
+        # tree hides payload-only failures (missing node_modules, Bun-isms)
+        # that shipped v1.0.2/3 had.
         shell: bash
         run: |
           set -e
           cd opencode-src
           node ../opencode.bundle.mjs --version
-          OPENCODE_SERVE=1 PORT=4096 node ../opencode.bundle.js &
-          SRV=$!
-          ok=""
-          for _ in $(seq 1 60); do
-            sleep 1
-            if curl -fsS -m 2 http://127.0.0.1:4096/health >/dev/null 2>&1; then ok=1; break; fi
-          done
-          kill $SRV 2>/dev/null || true
-          wait $SRV 2>/dev/null || true
-          if [ -z "$ok" ]; then
-            # NON-BLOCKING for now: the CLI bundle itself is proven (--version
-            # above, blocking), but serve mode has not answered /health within
-            # 60s in this environment. Ship the real bundle (a 39 MB working
-            # CLI beats the 383-byte placeholder of v1.0.0) and surface the
-            # diagnostics for the on-device validation pass.
-            echo "::warning::serve smoke test: GET /health did not answer within 60s — serve boot needs on-device verification"
-          else
-            echo "serve smoke test: /health answered"
-          fi
 
       - name: Smoke-test dynamic module install (npm install -g on demand)
         # The opencode agent must be able to add Node modules at runtime
@@ -507,6 +506,14 @@ jobs:
           # the bridge points at lib/node_modules via NODE_PATH), verifies
           # the package loads, and rejects native addons up front.
           cp .github/toolbox/install-module.mjs "$ROOT/lib/install-module.mjs"
+          # Bun shim (loaded by the launcher before the bundle) + the
+          # OpenAI-compat adapter the app's Dart client talks to, and the
+          # plugin-runtime stub modules the patched bundle resolves.
+          cp .github/toolbox/bun_shim.cjs "$ROOT/lib/bun_shim.cjs"
+          cp .github/toolbox/oagents-compat.mjs "$ROOT/lib/oagents-compat.mjs"
+          if [ -d bundle-stubs/node_modules ]; then
+            cp -r bundle-stubs/node_modules/. "$ROOT/lib/node_modules/"
+          fi
           # curated node_modules
           cp -r toolbox-staging/lib/node_modules/. "$ROOT/lib/node_modules/"
           # modules.json + version.txt at toolbox root (the bridge reads them)
@@ -619,6 +626,76 @@ jobs:
           cp /tmp/tb-extract/modules.json staging/assets/toolbox/modules.json
           echo "Final artifact tree:"
           find staging -maxdepth 4 -type f -printf '  %p (%s bytes)\n' | sort
+
+      # ------------------------------------------------------------------
+      # BLOCKING payload smoke: boot the REAL staged toolbox exactly like
+      # the on-device bridge does (launcher + shim + patched bundle on an
+      # internal port), then the compat adapter on the app-facing port, and
+      # assert /health + /models + a chat SSE round-trip. v1.0.2/v1.0.3
+      # shipped a serve mode that NEVER booted — CI's old smoke ran against
+      # the source tree and its serve check was non-blocking, so the
+      # regression shipped. This test extracts and runs the payload itself,
+      # so what CI proves is what the device gets.
+      # ------------------------------------------------------------------
+      - name: Payload smoke — serve boot + compat adapter (blocking)
+        shell: bash
+        run: |
+          set -e
+          TB=/tmp/tb-extract
+          export NODE_PATH="$TB/lib/node_modules"
+          export OPENCODE_SERVE=1 PORT=4097 OPENCODE_PASSWORD=smoke-pass
+          export OPENCODE_PHOTON_WASM_PATH="$TB/lib/photon_rs_bg.wasm"
+          export HOME=/tmp/oc-home npm_config_prefix="$TB"
+          # No provider is configured in CI, so the agent retries forever —
+          # the adapter's watchdog ends the SSE cleanly; assert the contract.
+          export OCODE_IDLE_TIMEOUT=20000
+          mkdir -p /tmp/oc-home /tmp/oc-cache /tmp/oc-tmp
+          export npm_config_cache=/tmp/oc-cache npm_config_tmp=/tmp/oc-tmp TMPDIR=/tmp/oc-tmp
+          export PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+          # System node runs the smoke (the tar's node-<abi> is a Bionic
+          # Android ELF that cannot exec on the runner).
+          node "$TB/lib/opencode.bundle.js" > /tmp/serve.log 2>&1 &
+          SRV=$!
+          ready=""
+          for _ in $(seq 1 90); do
+            sleep 1
+            grep -q "server listening" /tmp/serve.log && { ready=1; break; }
+          done
+          if [ -z "$ready" ]; then
+            echo "::error::opencode serve did not boot from the payload within 90s"
+            tail -40 /tmp/serve.log
+            kill $SRV 2>/dev/null || true
+            exit 1
+          fi
+          grep "server listening" /tmp/serve.log
+          echo "opencode serve boot: PASS"
+          # The compat adapter on the app-facing port (4096).
+          PORT=4096 OCODE_UP=http://127.0.0.1:4097 OCODE_PASS=smoke-pass \
+            node "$TB/lib/oagents-compat.mjs" > /tmp/compat.log 2>&1 &
+          AD=$!
+          for _ in $(seq 1 20); do
+            sleep 1
+            curl -fsS -m 2 http://127.0.0.1:4096/health >/dev/null 2>&1 && break
+          done
+          echo "adapter /health: $(curl -fsS -m 5 http://127.0.0.1:4096/health)"
+          echo "adapter /models: $(curl -fsS -m 10 -H 'Authorization: Bearer x' http://127.0.0.1:4096/models | head -c 200)"
+          # Chat plumbing: without a provider configured the session errors,
+          # but the SSE contract itself must hold (data chunks + [DONE]).
+          curl -sN -m 30 -X POST http://127.0.0.1:4096/chat/completions \
+            -H 'content-type: application/json' -H 'Authorization: Bearer x' \
+            -d '{"messages":[{"role":"user","content":"ping"}],"stream":true}' \
+            > /tmp/chat.sse || true
+          if ! grep -q "^\[DONE\]$\|^data: \[DONE\]$" /tmp/chat.sse && ! grep -q "data: \[DONE\]" /tmp/chat.sse; then
+            echo "::error::chat SSE did not complete with [DONE]"
+            head -20 /tmp/chat.sse
+            kill $AD $SRV 2>/dev/null || true
+            exit 1
+          fi
+          echo "chat SSE transcript (first 400 bytes):"
+          head -c 400 /tmp/chat.sse; echo
+          echo "payload serve + compat adapter smoke: PASS"
+          kill $AD $SRV 2>/dev/null || true
+          wait $AD $SRV 2>/dev/null || true
 
       - name: Upload oagents-toolbox artifact
         uses: actions/upload-artifact@v4

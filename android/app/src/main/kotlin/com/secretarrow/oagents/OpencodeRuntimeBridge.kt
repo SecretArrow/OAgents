@@ -87,7 +87,14 @@ class OpencodeRuntimeBridge(private val context: Context) {
         private const val VERSION_NAME = "version.txt"
         private const val MODULES_MANIFEST = "modules.json"
         private const val BUNDLE_NAME = "opencode.bundle.js"
+        private const val COMPAT_NAME = "oagents-compat.mjs"
+        // The opencode server binds the INTERNAL port; the OpenAI-compat
+        // adapter (lib/oagents-compat.mjs) listens on PORT for the app —
+        // /health, /models and /chat/completions are served by the adapter,
+        // which proxies to the server with Basic auth (opencode:<password>).
         private const val PORT = 4096
+        private const val INTERNAL_PORT = 4097
+        private const val SERVER_PASSWORD = "oagents"
         private const val HEALTH_URL = "http://127.0.0.1:$PORT/health"
         // Revision file written into the extracted toolbox so we can skip
         // re-extraction when the bundled revision has not changed.
@@ -96,6 +103,7 @@ class OpencodeRuntimeBridge(private val context: Context) {
 
     private val status = AtomicReference<Map<String, Any>>(statusMap("unknown"))
     private var process: Process? = null
+    private var adapterProcess: Process? = null
     private var sink: EventChannel.EventSink? = null
     private var extractedRevision: String? = null
 
@@ -207,8 +215,12 @@ class OpencodeRuntimeBridge(private val context: Context) {
                 ),
             ).directory(workDir).redirectErrorStream(true)
             val env = pb.environment()
-            env["PORT"] = PORT.toString()
+            env["PORT"] = INTERNAL_PORT.toString()
             env["OPENCODE_SERVE"] = "1"
+            // The server requires HTTP Basic auth (user "opencode"); the
+            // compat adapter forwards requests with this password. Loopback
+            // only, app-private — a fixed local secret is fine.
+            env["OPENCODE_PASSWORD"] = SERVER_PASSWORD
             // Tell the npm/npx shell shims which per-ABI node binary to exec.
             env["OAGENTS_ABI"] = abi
             // Make the toolbox's bin/ (node, npm, npx, agent-browser) the
@@ -269,6 +281,39 @@ class OpencodeRuntimeBridge(private val context: Context) {
                 }
             }
 
+            // The OpenAI-compat adapter on the APP-facing port (4096): the
+            // Dart client (opencode_client.dart) and this bridge's readiness
+            // poll both talk to it — /health, /models, /chat/completions —
+            // and it proxies to the opencode server with Basic auth. Its
+            // /health only answers 200 once the upstream server is reachable.
+            val compat = File(libDir, COMPAT_NAME)
+            if (compat.exists()) {
+                val ca = ProcessBuilder(
+                    listOf(
+                        nodeBin.absolutePath,
+                        compat.absolutePath,
+                    ),
+                ).directory(workDir).redirectErrorStream(true)
+                val cenv = ca.environment()
+                cenv["PORT"] = PORT.toString()
+                cenv["OCODE_UP"] = "http://127.0.0.1:$INTERNAL_PORT"
+                cenv["OCODE_PASS"] = SERVER_PASSWORD
+                cenv["NODE_PATH"] = File(libDir, "node_modules").absolutePath
+                cenv["TMPDIR"] = File(context.cacheDir, "npm-tmp").absolutePath.also {
+                    File(it).mkdirs()
+                }
+                val ap = ca.start()
+                adapterProcess = ap
+                thread(start = true, isDaemon = true) {
+                    try {
+                        ap.inputStream.bufferedReader().use { r ->
+                            r.forEachLine { /* drain */ }
+                        }
+                    } catch (_: Throwable) {
+                    }
+                }
+            }
+
             val ready = waitForHealth(timeoutMs = 25_000)
             if (ready) {
                 emit(statusMap("running", revision = revision, version = revision))
@@ -290,6 +335,8 @@ class OpencodeRuntimeBridge(private val context: Context) {
 
     private fun stop() {
         try {
+            adapterProcess?.let { it.destroyForcibly() }
+            adapterProcess = null
             process?.let { it.destroyForcibly() }
             process = null
             context.stopService(Intent(context, OAgentsForegroundService::class.java))
