@@ -129,7 +129,10 @@ async function main() {
       JSON.stringify({
         ok: false,
         spec,
-        error: `npm install exited ${res.code}`,
+        // Include the spawn error message (res.err) — a bare "exited -1"
+        // with an empty log made a spawn failure (missing/non-executable
+        // shim, ENOEXEC) undiagnosable. Found by the sandbox tar test.
+        error: `npm install exited ${res.code}${res.err ? `: ${res.err}` : ""}`,
         npmLog: res.stderr.slice(-4000),
       }) + "\n",
     )

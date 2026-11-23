@@ -213,8 +213,12 @@ class OpencodeRuntimeBridge(private val context: Context) {
             env["OAGENTS_ABI"] = abi
             // Make the toolbox's bin/ (node, npm, npx, agent-browser) the
             // FIRST thing on PATH so opencode's child processes resolve
-            // them ahead of any system binary.
+            // them ahead of any system binary. lib/node_modules/.bin comes
+            // next: the extracted symlinks (tsc, zx, esbuild, tsx, vite,
+            // vitest, prettier …) become plain shell commands for the
+            // agent — and npx/npm-exec PATH lookups find them too.
             env["PATH"] = binDir.absolutePath + ":" +
+                File(libDir, "node_modules/.bin").absolutePath + ":" +
                 (System.getenv("PATH") ?: "/system/bin:/system/xbin")
             // LD_LIBRARY_PATH → per-ABI lib dir, so the Termux-built node-<abi>
             // binary resolves its companion shared libs (libcrypto.so.3,
@@ -506,9 +510,20 @@ internal class TarExtractor(private val input: InputStream) {
                 continue
             }
             if (typeFlag == '2') {
-                // Symlink — skip the body (we cannot materialize symlinks
-                // reliably across Android storage); node_modules symlinks
-                // are rare and the npm install in CI dedupes them.
+                // Symlink — materialize it. npm ships node_modules/.bin as
+                // symlinks (tsc, zx, esbuild, tsx, vite, vitest, prettier,
+                // agent-browser …); skipping them made every dev CLI
+                // invisible on-device (npx/npm-exec and the agent shell
+                // could not run any of them — found by the sandbox tar
+                // test against the real 905MB toolbox). App-private
+                // storage supports symlinks on every Android version;
+                // NIO Files.createSymbolicLink exists since API 26, older
+                // devices fall back to /system/bin/ln. Any failure degrades
+                // to the old skip — the require() path never needs .bin.
+                val linkTarget = parseTarString(header, 157, 100)
+                if (linkTarget.isNotEmpty()) {
+                    createSymlink(File(destDir, name), linkTarget)
+                }
                 if (padded > 0) skipFully(padded.toInt())
                 continue
             }
@@ -518,9 +533,95 @@ internal class TarExtractor(private val input: InputStream) {
             outFile.outputStream().use { out ->
                 copy(input, out, size)
             }
+            // Restore the POSIX mode bits from the tar header. Without this
+            // every file landed 0644: bin/npm + bin/npx were NOT executable
+            // (install-module.mjs died on-device with "npm install exited
+            // -1", empty log) and the .bin symlink TARGETS (typescript/bin/
+            // tsc …) were not exec-able. CI never caught it because GNU tar
+            // restores modes when it stages/extracts the toolbox.
+            val mode = parseTarOctal(header, 100, 8)
+            applyPosixMode(outFile, mode)
             // Skip any remaining padding within the last 512 block.
             val pad = (padded - size).toInt()
             if (pad > 0) skipFully(pad)
+        }
+    }
+
+    /** Trimmed NUL/space string field (tar name, linkname). */
+    private fun parseTarString(header: ByteArray, off: Int, len: Int): String {
+        var end = off + len
+        while (end > off && (header[end - 1] == 0.toByte() || header[end - 1] == ' '.code.toByte())) end--
+        return String(header, off, end - off)
+    }
+
+    private fun parseTarOctal(header: ByteArray, off: Int, len: Int): Int =
+        parseTarString(header, off, len).toLongOrNull(8)?.toInt() ?: 0
+
+    /**
+     * Restores the tar header's POSIX mode bits exactly. API 26+ maps every
+     * rwx bit 1:1 via java.nio.file.Files.setPosixFilePermissions (checked
+     * byte-for-byte against GNU tar on the real 905MB toolbox in the
+     * sandbox test); API 24-25 falls back to java.io.File approximations —
+     * only the exec bits matter functionally there, and app-private
+     * storage relaxations are harmless (single-app sandbox).
+     */
+    private fun applyPosixMode(file: File, mode: Int) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val perms = java.util.EnumSet.noneOf(
+                    java.nio.file.attribute.PosixFilePermission::class.java,
+                )
+                // Tar mode octal: rwxrwxrwx = 0o111_111_111 (owner, group,
+                // other). Kotlin has no octal literals — binary form.
+                if (mode and 0b100_000_000 != 0) perms.add(java.nio.file.attribute.PosixFilePermission.OWNER_READ)
+                if (mode and 0b010_000_000 != 0) perms.add(java.nio.file.attribute.PosixFilePermission.OWNER_WRITE)
+                if (mode and 0b001_000_000 != 0) perms.add(java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE)
+                if (mode and 0b000_100_000 != 0) perms.add(java.nio.file.attribute.PosixFilePermission.GROUP_READ)
+                if (mode and 0b000_010_000 != 0) perms.add(java.nio.file.attribute.PosixFilePermission.GROUP_WRITE)
+                if (mode and 0b000_001_000 != 0) perms.add(java.nio.file.attribute.PosixFilePermission.GROUP_EXECUTE)
+                if (mode and 0b000_000_100 != 0) perms.add(java.nio.file.attribute.PosixFilePermission.OTHERS_READ)
+                if (mode and 0b000_000_010 != 0) perms.add(java.nio.file.attribute.PosixFilePermission.OTHERS_WRITE)
+                if (mode and 0b000_000_001 != 0) perms.add(java.nio.file.attribute.PosixFilePermission.OTHERS_EXECUTE)
+                java.nio.file.Files.setPosixFilePermissions(file.toPath(), perms)
+                return
+            }
+        } catch (_: Exception) {
+            // Fall through to the API-24-safe approximation.
+        }
+        try {
+            file.setReadable(mode and 0b100_000_000 != 0, true)
+            file.setWritable(mode and 0b010_000_000 != 0, true)
+            file.setExecutable(mode and 0b001_000_000 != 0, true)
+            if (mode and 0b000_100_100 != 0) file.setReadable(true, false)
+            if (mode and 0b000_010_010 != 0) file.setWritable(true, false)
+            if (mode and 0b000_001_001 != 0) file.setExecutable(true, false)
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun createSymlink(link: File, target: String) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                java.nio.file.Files.createSymbolicLink(
+                    link.toPath(),
+                    java.nio.file.Paths.get(target),
+                )
+                return
+            }
+        } catch (_: Exception) {
+            // Target exists from a previous partial extract, FS refuses
+            // symlinks, … — fall through to the ln fallback.
+        }
+        try {
+            // Plain waitFor(): the timed-overload waitFor(long, TimeUnit)
+            // only exists since API 26 and this fallback runs exactly on
+            // API 24-25. ln is instant — blocking is fine here.
+            ProcessBuilder("ln", "-sfn", target, link.absolutePath)
+                .redirectErrorStream(true)
+                .start()
+                .waitFor()
+        } catch (_: Exception) {
+            // Old behavior: no symlink — the require() path still works.
         }
     }
 

@@ -254,11 +254,30 @@ class MainActivity : FlutterFragmentActivity() {
             outThread.start()
             errThread.start()
             val budget = timeoutMs.coerceIn(1_000L, 120_000L)
-            val finished = process.waitFor(budget, TimeUnit.MILLISECONDS)
+            // waitFor(timeout) is API 26+; CompletableFuture (API 24+) with
+            // a timed get() implements the same deadline safely on
+            // Android 7.x, where the timed overload would throw
+            // NoSuchMethodError inside this channel.
+            val finished = try {
+                java.util.concurrent.CompletableFuture.supplyAsync {
+                    process.waitFor() >= 0
+                }.get(budget, TimeUnit.MILLISECONDS)
+            } catch (_: java.util.concurrent.TimeoutException) {
+                false
+            } catch (_: Exception) {
+                false
+            }
             var timedOut = false
             if (!finished) {
                 timedOut = true
                 process.destroyForcibly()
+                // Let the destroy settle so exitValue() below is valid.
+                try {
+                    java.util.concurrent.CompletableFuture.supplyAsync {
+                        process.waitFor() >= 0
+                    }.get(2, TimeUnit.SECONDS)
+                } catch (_: Exception) {
+                }
             }
             outThread.join(2_000)
             errThread.join(2_000)
