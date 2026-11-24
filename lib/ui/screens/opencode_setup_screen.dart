@@ -220,7 +220,8 @@ class _StatusCard extends StatelessWidget {
       OpencodeRuntimeState.failed => theme.colorScheme.error,
       _ => theme.colorScheme.outline,
     };
-    final bool booting = status.state == OpencodeRuntimeState.starting ||
+    final bool booting =
+        status.state == OpencodeRuntimeState.starting ||
         status.state == OpencodeRuntimeState.extracting;
     // Human phrasing next to the raw state name, so "extracting" and
     // "starting" read as progress ("Unpacking toolbox…", "Booting…")
@@ -246,7 +247,10 @@ class _StatusCard extends StatelessWidget {
                   SizedBox(
                     width: 12,
                     height: 12,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: color),
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: color,
+                    ),
                   )
                 else
                   Icon(Icons.circle, color: color, size: 12),

@@ -24,10 +24,10 @@ void main() {
   // the overridden provider (a nested scope here would shadow it and the
   // badge would get the real platform-channel bridge).
   Widget host(Widget child) => MaterialApp(
-        debugShowCheckedModeBanner: false,
-        theme: buildDarkTheme(),
-        home: Scaffold(appBar: AppBar(actions: <Widget>[child])),
-      );
+    debugShowCheckedModeBanner: false,
+    theme: buildDarkTheme(),
+    home: Scaffold(appBar: AppBar(actions: <Widget>[child])),
+  );
 
   Widget harness(Widget child, FakeOpencodeRuntimeBridge runtime) =>
       ProviderScope(
@@ -52,8 +52,9 @@ void main() {
     runtime.dispose();
   });
 
-  testWidgets('badge shows boot label + pulsing dot while starting',
-      (WidgetTester tester) async {
+  testWidgets('badge shows boot label + pulsing dot while starting', (
+    WidgetTester tester,
+  ) async {
     final FakeOpencodeRuntimeBridge runtime = FakeOpencodeRuntimeBridge(
       initial: const OpencodeRuntimeStatus(
         state: OpencodeRuntimeState.starting,
@@ -68,8 +69,9 @@ void main() {
     runtime.dispose();
   });
 
-  testWidgets('badge transitions live: starting → running flips the label',
-      (WidgetTester tester) async {
+  testWidgets('badge transitions live: starting → running flips the label', (
+    WidgetTester tester,
+  ) async {
     final FakeOpencodeRuntimeBridge runtime = FakeOpencodeRuntimeBridge(
       initial: const OpencodeRuntimeStatus(
         state: OpencodeRuntimeState.starting,
@@ -77,18 +79,21 @@ void main() {
     );
     await tester.pumpWidget(harness(const OpencodeStatusBadge(), runtime));
     expect(find.text('opencode …'), findsOneWidget);
-    runtime.emit(const OpencodeRuntimeStatus(
-      state: OpencodeRuntimeState.running,
-      version: 'v9',
-    ));
+    runtime.emit(
+      const OpencodeRuntimeStatus(
+        state: OpencodeRuntimeState.running,
+        version: 'v9',
+      ),
+    );
     await tester.pump();
     expect(find.text('opencode v9'), findsOneWidget);
     expect(find.text('opencode …'), findsNothing);
     runtime.dispose();
   });
 
-  testWidgets('badge shows failed label and stopped label',
-      (WidgetTester tester) async {
+  testWidgets('badge shows failed label and stopped label', (
+    WidgetTester tester,
+  ) async {
     final FakeOpencodeRuntimeBridge runtime = FakeOpencodeRuntimeBridge(
       initial: const OpencodeRuntimeStatus(
         state: OpencodeRuntimeState.failed,
@@ -105,8 +110,9 @@ void main() {
     runtime.dispose();
   });
 
-  testWidgets('extracting shows the boot label too',
-      (WidgetTester tester) async {
+  testWidgets('extracting shows the boot label too', (
+    WidgetTester tester,
+  ) async {
     final FakeOpencodeRuntimeBridge runtime = FakeOpencodeRuntimeBridge(
       initial: const OpencodeRuntimeStatus(
         state: OpencodeRuntimeState.extracting,

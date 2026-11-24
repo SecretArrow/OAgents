@@ -62,7 +62,8 @@ class _OpencodeStatusBadgeState extends State<OpencodeStatusBadge> {
       OpencodeRuntimeState.failed => theme.colorScheme.error,
       _ => theme.colorScheme.outline,
     };
-    final bool loading = _status.state == OpencodeRuntimeState.starting ||
+    final bool loading =
+        _status.state == OpencodeRuntimeState.starting ||
         _status.state == OpencodeRuntimeState.extracting;
     return Tooltip(
       message: _tooltip,
@@ -122,31 +123,32 @@ class _OpencodeStatusBadgeState extends State<OpencodeStatusBadge> {
   }
 
   String get _label => switch (_status.state) {
-        OpencodeRuntimeState.running => _status.version.isNotEmpty
-            ? 'opencode ${_status.version}'
-            : 'opencode',
-        OpencodeRuntimeState.extracting => 'opencode …',
-        OpencodeRuntimeState.starting => 'opencode …',
-        OpencodeRuntimeState.failed => 'opencode ✕',
-        OpencodeRuntimeState.stopped => 'opencode off',
-        OpencodeRuntimeState.unknown => 'opencode …',
-      };
+    OpencodeRuntimeState.running =>
+      _status.version.isNotEmpty ? 'opencode ${_status.version}' : 'opencode',
+    OpencodeRuntimeState.extracting => 'opencode …',
+    OpencodeRuntimeState.starting => 'opencode …',
+    OpencodeRuntimeState.failed => 'opencode ✕',
+    OpencodeRuntimeState.stopped => 'opencode off',
+    OpencodeRuntimeState.unknown => 'opencode …',
+  };
 
   String get _tooltip => switch (_status.state) {
-        OpencodeRuntimeState.running => _status.version.isNotEmpty
-            ? 'opencode is running (${_status.version})'
-            : 'opencode is running',
-        OpencodeRuntimeState.extracting =>
-          'opencode is unpacking its embedded toolbox (first run only)',
-        OpencodeRuntimeState.starting =>
-          'opencode is booting and will be ready shortly',
-        OpencodeRuntimeState.failed => _status.message.isNotEmpty
-            ? 'opencode failed to start: ${_status.message}'
-            : 'opencode failed to start',
-        OpencodeRuntimeState.stopped => 'opencode is stopped — tap to start',
-        OpencodeRuntimeState.unknown =>
-          'opencode status unknown — waiting for the runtime bridge',
-      };
+    OpencodeRuntimeState.running =>
+      _status.version.isNotEmpty
+          ? 'opencode is running (${_status.version})'
+          : 'opencode is running',
+    OpencodeRuntimeState.extracting =>
+      'opencode is unpacking its embedded toolbox (first run only)',
+    OpencodeRuntimeState.starting =>
+      'opencode is booting and will be ready shortly',
+    OpencodeRuntimeState.failed =>
+      _status.message.isNotEmpty
+          ? 'opencode failed to start: ${_status.message}'
+          : 'opencode failed to start',
+    OpencodeRuntimeState.stopped => 'opencode is stopped — tap to start',
+    OpencodeRuntimeState.unknown =>
+      'opencode status unknown — waiting for the runtime bridge',
+  };
 }
 
 /// An amber dot that fades in/out forever while the runtime is booting.
@@ -177,10 +179,7 @@ class _PulsingDotState extends State<_PulsingDot>
     return FadeTransition(
       opacity: _controller,
       child: DecoratedBox(
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: widget.color,
-        ),
+        decoration: BoxDecoration(shape: BoxShape.circle, color: widget.color),
         child: const SizedBox.expand(),
       ),
     );
