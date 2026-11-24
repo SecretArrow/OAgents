@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../di.dart';
 import '../../services/opencode_runtime.dart';
@@ -29,7 +30,9 @@ class OpencodeStatusBadge extends StatefulWidget {
   State<OpencodeStatusBadge> createState() => _OpencodeStatusBadgeState();
 }
 
-class _OpencodeStatusBadgeState extends State<OpencodeStatusBadge> {
+// ConsumerStatefulWidget base (not plain State): the badge reads the
+// runtime provider in initState, which requires Riverpod's `ref`.
+class _OpencodeStatusBadgeState extends ConsumerState<OpencodeStatusBadge> {
   StreamSubscription<OpencodeRuntimeStatus>? _sub;
   OpencodeRuntimeStatus _status = OpencodeRuntimeStatus.initial;
 

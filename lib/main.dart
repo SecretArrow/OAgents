@@ -12,7 +12,6 @@ import 'l10n/app_strings.dart';
 import 'models/models.dart';
 import 'services/context_repository.dart';
 import 'services/cron_repository.dart';
-import 'services/opencode_runtime.dart';
 import 'services/prompt_repository.dart';
 import 'services/settings_repository.dart';
 import 'ui/lock_gate.dart';
