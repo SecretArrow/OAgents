@@ -16,6 +16,7 @@ import '../widgets/model_picker.dart';
 import '../widgets/module_repair_card.dart';
 import '../widgets/module_setup_sheet.dart';
 import '../widgets/app_message.dart';
+import '../widgets/opencode_status_badge.dart';
 import '../../services/update_checker.dart' show UpdateCheckResult;
 import 'opencode_setup_screen.dart';
 import 'settings_screen.dart';
@@ -187,6 +188,11 @@ class _HomeShellState extends ConsumerState<HomeShell> {
             ],
           ),
           actions: <Widget>[
+            // v1.0.6 — live opencode runtime indicator (dot + label,
+            // pulsing while booting, tap → setup screen). Kept FIRST so it
+            // is visible even when the action row clips on narrow screens.
+            const OpencodeStatusBadge(),
+            const SizedBox(width: 4),
             const AgentModeToggle(),
             if (showLanguageMenu) const _LanguageMenu(),
             IconButton(

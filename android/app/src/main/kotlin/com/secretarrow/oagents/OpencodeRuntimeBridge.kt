@@ -107,6 +107,15 @@ class OpencodeRuntimeBridge(private val context: Context) {
     private var sink: EventChannel.EventSink? = null
     private var extractedRevision: String? = null
 
+    // EventChannel.EventSink methods MUST run on the platform main thread
+    // (flutter.io platform-channels doc). start() and the drain threads emit
+    // from background threads, so every sink call is marshalled through this
+    // main-looper Handler instead of being invoked where emit() happens to
+    // run. Without it a strict engine (FlutterJNI threading check) throws
+    // 'Methods marked with @UiThread must be called on the main thread' and
+    // kills the process mid-startup.
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
     fun register(flutterEngine: FlutterEngine) {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, METHOD)
             .setMethodCallHandler { call, result ->
@@ -153,15 +162,22 @@ class OpencodeRuntimeBridge(private val context: Context) {
 
             // Idempotent extraction: only re-extract when the bundled
             // revision changes. The marker file lives inside the toolbox
-            // dir and is wiped with it on a re-extract.
+            // dir and is wiped with it on a re-extract. The null-memory
+            // short-circuit is intentionally NOT enough on its own: after
+            // a process restart extractedRevision is null, and re-extracting
+            // the ~558MB toolbox on every cold start would put a full
+            // re-extraction on the startup critical path. The marker file
+            // survives restarts, so trust it: when it matches the bundled
+            // revision, the on-disk toolbox is already current — skip the
+            // extraction and go straight to resolving the node binary.
             val marker = File(workDir, EXTRACTED_REV)
-            val needExtract = extractedRevision == null ||
-                marker.readText().trim() != revision
+            val needExtract = !marker.exists() ||
+                runCatching { marker.readText().trim() }.getOrNull() != revision
             if (needExtract) {
                 extractToolboxTar(workDir)
                 marker.writeText(revision)
-                extractedRevision = revision
             }
+            extractedRevision = revision
 
             val nodeBin = resolveNodeBinary(workDir)
             if (nodeBin == null) {
@@ -334,15 +350,35 @@ class OpencodeRuntimeBridge(private val context: Context) {
     }
 
     private fun stop() {
+        // Throwable, not Exception: destroyForcibly() is only documented
+        // since API 26 — on Android 7.0/7.1 it can raise a NoSuchMethodError
+        // (an Error), which the previous catch (Exception) let through and
+        // killed the process on the main thread right where the user tapped
+        // stop. destroy() exists since API 1 and is the correct fallback.
         try {
-            adapterProcess?.let { it.destroyForcibly() }
+            adapterProcess?.let { killProcess(it) }
             adapterProcess = null
-            process?.let { it.destroyForcibly() }
+            process?.let { killProcess(it) }
             process = null
             context.stopService(Intent(context, OAgentsForegroundService::class.java))
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
         }
         emit(statusMap("stopped"))
+    }
+
+    /// API-24-safe process kill: destroyForcibly() on API 26+, plain
+    /// destroy() below it. Both are best-effort — the child also exits when
+    /// its pipes close — so a failed kill degrades, never throws.
+    private fun killProcess(p: Process) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                p.destroyForcibly()
+            } else {
+                p.destroy()
+            }
+        } catch (_: Throwable) {
+            try { p.destroy() } catch (_: Throwable) {}
+        }
     }
 
     private fun deviceAbi(): String =
@@ -487,7 +523,26 @@ class OpencodeRuntimeBridge(private val context: Context) {
 
     private fun emit(s: Map<String, Any>) {
         status.set(s)
-        sink?.success(s)
+        // Set the shared status first (any thread may read it through the
+        // "status" method channel), then hand the sink call to the main
+        // thread — invoking EventSink.success() off the main looper violates
+        // the EventChannel contract and crashes on strict engines.
+        val target = sink
+        if (target != null) {
+            mainHandler.post {
+                // Re-read sink: it may have been cancelled between the
+                // capture and the post landing.
+                val live = sink
+                if (live != null) {
+                    try {
+                        live.success(s)
+                    } catch (_: Throwable) {
+                        // Sink died mid-flight (engine detached) — the
+                        // AtomicReference remains the source of truth.
+                    }
+                }
+            }
+        }
     }
 }
 

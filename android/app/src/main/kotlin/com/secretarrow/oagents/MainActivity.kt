@@ -270,7 +270,14 @@ class MainActivity : FlutterFragmentActivity() {
             var timedOut = false
             if (!finished) {
                 timedOut = true
-                process.destroyForcibly()
+                // destroyForcibly() is API 26+; destroy() exists since API 1
+                // and on Android 7.x still kills the child (its parent also
+                // closes the pipes). Same effect, no NoSuchMethodError.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    process.destroyForcibly()
+                } else {
+                    process.destroy()
+                }
                 // Let the destroy settle so exitValue() below is valid.
                 try {
                     java.util.concurrent.CompletableFuture.supplyAsync {

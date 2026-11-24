@@ -220,6 +220,20 @@ class _StatusCard extends StatelessWidget {
       OpencodeRuntimeState.failed => theme.colorScheme.error,
       _ => theme.colorScheme.outline,
     };
+    final bool booting = status.state == OpencodeRuntimeState.starting ||
+        status.state == OpencodeRuntimeState.extracting;
+    // Human phrasing next to the raw state name, so "extracting" and
+    // "starting" read as progress ("Unpacking toolbox…", "Booting…")
+    // instead of bare enum words; the raw name stays for tests/debug.
+    final String phrase = switch (status.state) {
+      OpencodeRuntimeState.running => 'Ready — serving models',
+      OpencodeRuntimeState.extracting =>
+        'Unpacking embedded toolbox (first run)…',
+      OpencodeRuntimeState.starting => 'Booting opencode server…',
+      OpencodeRuntimeState.failed => 'Failed to start',
+      OpencodeRuntimeState.stopped => 'Stopped',
+      OpencodeRuntimeState.unknown => 'Waiting for runtime bridge…',
+    };
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -228,9 +242,25 @@ class _StatusCard extends StatelessWidget {
           children: <Widget>[
             Row(
               children: <Widget>[
-                Icon(Icons.circle, color: color, size: 12),
+                if (booting)
+                  SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: color),
+                  )
+                else
+                  Icon(Icons.circle, color: color, size: 12),
                 const SizedBox(width: 8),
                 Text(status.state.name, style: theme.textTheme.titleMedium),
+                const SizedBox(width: 10),
+                Flexible(
+                  child: Text(
+                    phrase,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
               ],
             ),
             if (status.version.isNotEmpty) ...<Widget>[
