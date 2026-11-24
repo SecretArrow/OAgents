@@ -23,15 +23,17 @@ import '../screens/opencode_setup_screen.dart';
 /// Tapping it opens the opencode setup screen, where the full status card,
 /// failure message, version/bundle revision and the start/stop controls
 /// live. No SnackBar/Toast anywhere — status is state, not a notification.
-class OpencodeStatusBadge extends StatefulWidget {
+// ConsumerStatefulWidget (not StatefulWidget): the state class reads the
+// runtime provider in initState, which requires Riverpod's `ref` on both
+// sides of the pair.
+class OpencodeStatusBadge extends ConsumerStatefulWidget {
   const OpencodeStatusBadge({super.key});
 
   @override
-  State<OpencodeStatusBadge> createState() => _OpencodeStatusBadgeState();
+  ConsumerState<OpencodeStatusBadge> createState() =>
+      _OpencodeStatusBadgeState();
 }
 
-// ConsumerStatefulWidget base (not plain State): the badge reads the
-// runtime provider in initState, which requires Riverpod's `ref`.
 class _OpencodeStatusBadgeState extends ConsumerState<OpencodeStatusBadge> {
   StreamSubscription<OpencodeRuntimeStatus>? _sub;
   OpencodeRuntimeStatus _status = OpencodeRuntimeStatus.initial;
