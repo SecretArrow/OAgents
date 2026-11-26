@@ -88,10 +88,23 @@ function readFileSyncSafe(p) {
 
 function runNpm(args) {
   return new Promise((resolve) => {
-    const child = spawn(npmBin, args, {
-      env: process.env,
-      stdio: ["ignore", "pipe", "pipe"],
-    })
+    // v1.0.7 W^X: on Android 10+ (targetSdk >= 29) exec() of ANY file in
+    // the app data dir is sepolicy-denied — including this shell shim.
+    // Spawn it through /system/bin/sh (reading the script is fine; only
+    // the exec bit is restricted), and let the shim exec the node binary
+    // named by OAGENTS_NODE_BIN (the nativeLibraryDir copy, exported by
+    // the Kotlin bridge). Falls back to direct exec for old devices and
+    // for the CI payload smoke test, which runs on a plain Linux host.
+    const useShell = process.platform === "android" || process.env.OAGENTS_FORCE_SH === "1"
+    const child = useShell
+      ? spawn("/system/bin/sh", [npmBin, ...args], {
+          env: process.env,
+          stdio: ["ignore", "pipe", "pipe"],
+        })
+      : spawn(npmBin, args, {
+          env: process.env,
+          stdio: ["ignore", "pipe", "pipe"],
+        })
     let stdout = ""
     let stderr = ""
     child.stdout.on("data", (d) => (stdout += d.toString()))

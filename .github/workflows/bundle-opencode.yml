@@ -555,13 +555,23 @@ jobs:
           if [ -d node-mobile/npm-shared/npm ]; then
             cp -r node-mobile/npm-shared/npm "$ROOT/lib/node_modules/npm"
             # npm/npx shims exec the bundled node with the right CLI entry.
+            # v1.0.7 W^X: on Android 10+ (targetSdk >= 29) exec() of any
+            # file in the app data dir is forbidden (sepolicy neverallow
+            # app_data_file execute_no_trans), so the shim must exec the
+            # node binary the Kotlin bridge resolves — nativeLibraryDir's
+            # libnode-<abi>.so (staged as jniLibs by CI, extracted with the
+            # exec bit by the installer because useLegacyPackaging=true).
+            # The bridge exports OAGENTS_NODE_BIN with that absolute path;
+            # the filesDir copy stays the fallback for minSdk 24-28 devices.
             cat > "$ROOT/bin/npm" <<'EOF'
           #!/system/bin/sh
           # OAgents toolbox shim — runs the bundled npm via the per-ABI node.
           HERE="$(cd "$(dirname "$0")/.." && pwd)"
           ABI="$OAGENTS_ABI"
           [ -z "$ABI" ] && ABI="arm64-v8a"
-          exec "$HERE/bin/node-$ABI" "$HERE/lib/node_modules/npm/bin/npm-cli.js" "$@"
+          NODE_BIN="$OAGENTS_NODE_BIN"
+          [ -n "$NODE_BIN" ] && [ -x "$NODE_BIN" ] || NODE_BIN="$HERE/bin/node-$ABI"
+          exec "$NODE_BIN" "$HERE/lib/node_modules/npm/bin/npm-cli.js" "$@"
           EOF
             cat > "$ROOT/bin/npx" <<'EOF'
           #!/system/bin/sh
@@ -569,7 +579,9 @@ jobs:
           HERE="$(cd "$(dirname "$0")/.." && pwd)"
           ABI="$OAGENTS_ABI"
           [ -z "$ABI" ] && ABI="arm64-v8a"
-          exec "$HERE/bin/node-$ABI" "$HERE/lib/node_modules/npm/bin/npx-cli.js" "$@"
+          NODE_BIN="$OAGENTS_NODE_BIN"
+          [ -n "$NODE_BIN" ] && [ -x "$NODE_BIN" ] || NODE_BIN="$HERE/bin/node-$ABI"
+          exec "$NODE_BIN" "$HERE/lib/node_modules/npm/bin/npx-cli.js" "$@"
           EOF
             chmod +x "$ROOT/bin/npm" "$ROOT/bin/npx"
             echo "Staged npm + npm/npx shims"
@@ -624,6 +636,41 @@ jobs:
           tar -xzf toolbox.tar.gz -C /tmp/tb-extract
           cp /tmp/tb-extract/version.txt staging/assets/toolbox/version.txt
           cp /tmp/tb-extract/modules.json staging/assets/toolbox/modules.json
+          # ----------------------------------------------------------------
+          # v1.0.7 — W^X fix: Android 10+ (targetSdk >= 29) forbids exec()
+          # of files in the app data directory (sepolicy neverallow
+          # app_data_file execute_no_trans). The only sanctioned executable
+          # location is the APK native library dir. Stage the per-ABI node
+          # + agent-browser binaries and node's companion .so libs as
+          # jniLibs/<abi>/lib<name>.so so the package manager extracts
+          # them into nativeLibraryDir with the exec bit set
+          # (useLegacyPackaging=true already set in build.gradle.kts).
+          # Names MUST match lib*.so or the installer skips them.
+          # ----------------------------------------------------------------
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            src="node-mobile/${abi}/node"
+            [ -f "$src" ] || continue
+            mkdir -p "staging/jniLibs/${abi}"
+            cp "$src" "staging/jniLibs/${abi}/libnode-${abi}.so"
+            chmod +x "staging/jniLibs/${abi}/libnode-${abi}.so"
+            if [ -d "node-mobile/${abi}/lib" ]; then
+              for so in node-mobile/${abi}/lib/*.so*; do
+                [ -e "$so" ] || continue
+                base="$(basename "$so")"
+                case "$base" in
+                  lib*.so) cp -L "$so" "staging/jniLibs/${abi}/${base}" ;;
+                  *)      cp -L "$so" "staging/jniLibs/${abi}/lib${base}" ;;
+                esac
+              done
+            fi
+            ab="agent-browser-mobile/${abi}/agent-browser"
+            [ -f "$ab" ] || ab="agent-browser-mobile/agent-browser-${abi}"
+            if [ -f "$ab" ]; then
+              cp "$ab" "staging/jniLibs/${abi}/libagentbrowser-${abi}.so"
+              chmod +x "staging/jniLibs/${abi}/libagentbrowser-${abi}.so"
+            fi
+            echo "jniLibs/${abi}: $(ls staging/jniLibs/${abi} | wc -l) files"
+          done
           echo "Final artifact tree:"
           find staging -maxdepth 4 -type f -printf '  %p (%s bytes)\n' | sort
 

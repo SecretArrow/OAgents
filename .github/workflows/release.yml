@@ -86,6 +86,20 @@ jobs:
           cp oagents-toolbox/assets/toolbox/toolbox.tar.gz android/app/src/main/assets/toolbox/
           cp oagents-toolbox/assets/toolbox/version.txt    android/app/src/main/assets/toolbox/
           cp oagents-toolbox/assets/toolbox/modules.json   android/app/src/main/assets/toolbox/
+          # v1.0.7 — W^X fix: copy the per-ABI jniLibs staged by the bundle
+          # workflow (libnode-<abi>.so, libagentbrowser-<abi>.so and node's
+          # companion lib*.so) so AGP packages them into lib/<abi>/ of the
+          # split APKs. useLegacyPackaging=true extracts them at install
+          # time into nativeLibraryDir, the only directory Android 10+
+          # allows apps (targetSdk >= 29) to exec from.
+          if [ -d oagents-toolbox/jniLibs ]; then
+            mkdir -p android/app/src/main/jniLibs
+            cp -r oagents-toolbox/jniLibs/. android/app/src/main/jniLibs/
+            echo "jniLibs staged:"
+            find android/app/src/main/jniLibs -type f -printf '  %p (%s bytes)\n' | sort
+          else
+            echo "::warning::oagents-toolbox/jniLibs missing — node will fall back to the filesDir copy (fails on Android 10+)."
+          fi
           # Also overwrite the Dart-side placeholders (pubspec declares
           # assets/toolbox/{modules.json,version.txt} — lib/services/
           # toolbox_manifest.dart reads them via rootBundle, and rootBundle

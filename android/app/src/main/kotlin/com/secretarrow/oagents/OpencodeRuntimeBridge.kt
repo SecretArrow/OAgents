@@ -195,6 +195,20 @@ class OpencodeRuntimeBridge(private val context: Context) {
             val agentBrowserBin = resolveAgentBrowser(workDir)
             chmodExec(nodeBin)
             agentBrowserBin?.let { chmodExec(it) }
+            // v1.0.7 W^X: expose the resolved node as a plain `node` name
+            // inside the toolbox bin dir. Shebang scripts (`#!/usr/bin/env
+            // node` — agent-browser-js, many .bin/* entries) resolve `node`
+            // via PATH; the nativeLibraryDir copy is named libnode-<abi>.so,
+            // so without this symlink they would find nothing (or, worse on
+            // old layouts, the non-exec-able filesDir copy). A symlink to an
+            // exec-able target is fine: the kernel execs the TARGET, which
+            // lives in nativeLibraryDir.
+            runCatching {
+                val plainNode = File(File(workDir, "bin"), "node")
+                if (!plainNode.exists()) {
+                    createSymlinkAbsolute(plainNode, nodeBin)
+                }
+            }
 
             emit(statusMap("starting", revision = revision))
             // Foreground service keeps the toolbox process alive when the
@@ -239,6 +253,12 @@ class OpencodeRuntimeBridge(private val context: Context) {
             env["OPENCODE_PASSWORD"] = SERVER_PASSWORD
             // Tell the npm/npx shell shims which per-ABI node binary to exec.
             env["OAGENTS_ABI"] = abi
+            // v1.0.7 W^X: the bin/npm + bin/npx shims exec THIS binary —
+            // the nativeLibraryDir copy (libnode-<abi>.so) on Android 10+,
+            // where exec of the filesDir copy is sepolicy-denied. Without
+            // it, install-module.mjs's `npm install` would die with
+            // error=13 Permission denied on every modern device.
+            env["OAGENTS_NODE_BIN"] = nodeBin.absolutePath
             // Make the toolbox's bin/ (node, npm, npx, agent-browser) the
             // FIRST thing on PATH so opencode's child processes resolve
             // them ahead of any system binary. lib/node_modules/.bin comes
@@ -247,6 +267,9 @@ class OpencodeRuntimeBridge(private val context: Context) {
             // agent — and npx/npm-exec PATH lookups find them too.
             env["PATH"] = binDir.absolutePath + ":" +
                 File(libDir, "node_modules/.bin").absolutePath + ":" +
+                // v1.0.7: nativeLibraryDir is on PATH too so a bare `node`
+                // resolves to the exec-able jniLibs copy (libnode-<abi>.so).
+                File(context.applicationInfo.nativeLibraryDir).absolutePath + ":" +
                 (System.getenv("PATH") ?: "/system/bin:/system/xbin")
             // LD_LIBRARY_PATH → per-ABI lib dir, so the Termux-built node-<abi>
             // binary resolves its companion shared libs (libcrypto.so.3,
@@ -256,7 +279,16 @@ class OpencodeRuntimeBridge(private val context: Context) {
             // LD_LIBRARY_PATH ahead of the binary's baked RUNPATH (which
             // points at Termux's prefix and is wrong outside Termux), so the
             // node binary runs standalone on a vanilla Android system.
-            env["LD_LIBRARY_PATH"] = File(libDir, abi).absolutePath
+            // v1.0.7: nativeLibraryDir comes FIRST — the same companion
+            // .so libs are also staged as jniLibs/<abi>/lib<soname>.so by
+            // CI and live in the extracted native dir; resolving them
+            // there keeps working even if the per-ABI filesDir copy is
+            // ever removed, and libs loaded from apk_data_file are
+            // mmap-able (exec) which the filesDir copies are not on
+            // Android 10+ for targetSdk >= 29.
+            env["LD_LIBRARY_PATH"] =
+                File(context.applicationInfo.nativeLibraryDir).absolutePath + ":" +
+                File(libDir, abi).absolutePath
             // NODE_PATH lets `require('ethers')` etc. resolve against the
             // pre-installed node_modules without a per-script install.
             env["NODE_PATH"] = File(libDir, "node_modules").absolutePath
@@ -315,6 +347,19 @@ class OpencodeRuntimeBridge(private val context: Context) {
                 cenv["OCODE_UP"] = "http://127.0.0.1:$INTERNAL_PORT"
                 cenv["OCODE_PASS"] = SERVER_PASSWORD
                 cenv["NODE_PATH"] = File(libDir, "node_modules").absolutePath
+                // v1.0.7 W^X: the adapter (and anything it spawns) must
+                // also see the exec-able node + nativeLibraryDir on PATH,
+                // or an `npm`/`npx` call from a tool would hit the
+                // sepolicy-denied filesDir binary on Android 10+.
+                cenv["OAGENTS_NODE_BIN"] = nodeBin.absolutePath
+                cenv["OAGENTS_ABI"] = abi
+                cenv["PATH"] = binDir.absolutePath + ":" +
+                    File(libDir, "node_modules/.bin").absolutePath + ":" +
+                    File(context.applicationInfo.nativeLibraryDir).absolutePath + ":" +
+                    (System.getenv("PATH") ?: "/system/bin:/system/xbin")
+                cenv["LD_LIBRARY_PATH"] =
+                    File(context.applicationInfo.nativeLibraryDir).absolutePath + ":" +
+                    File(libDir, abi).absolutePath
                 cenv["TMPDIR"] = File(context.cacheDir, "npm-tmp").absolutePath.also {
                     File(it).mkdirs()
                 }
@@ -387,33 +432,51 @@ class OpencodeRuntimeBridge(private val context: Context) {
         else @Suppress("DEPRECATION") Build.CPU_ABI
 
     private fun resolveNodeBinary(workDir: File): File? {
-        // The Node runtime is a REAL executable shipped per-ABI in the
-        // toolbox (Termux-built node, linked against Android's Bionic libc
-        // + its companion .so libs under toolbox/lib). It is exec'd
-        // directly from filesDir — which is on the app's private data
-        // partition and therefore exec-able on every Android version
-        // (Termux itself relies on exactly this property).
+        // v1.0.7 — W^X fix. Android 10+ (targetSdk >= 29; this app targets
+        // API 36) forbids exec() of ANY file in the app data directory:
+        // sepolicy `neverallow { all_untrusted_apps ... } { app_data_file }:
+        // file execute_no_trans` (W^X violation). ProcessBuilder on
+        // /data/data/.../files/toolbox/bin/node-<abi> dies with IOException
+        // error=13 Permission denied — that was the "opencode never becomes
+        // ready on modern devices" bug.
         //
-        // NOTE: nodejs-mobile's libnode.so is a shared LIBRARY, not a PIE
-        // executable, so it CANNOT be exec'd via ProcessBuilder. If you
-        // later want the in-process libnode.so path, wire nodejs-mobile-
-        // android's JNI helper (System.loadLibrary("node") + node::Start)
-        // instead — do NOT try to exec libnode.so.
+        // The ONE sanctioned executable location is the APK's native
+        // library dir: CI stages the Termux node binary as
+        // jniLibs/<abi>/libnode-<abi>.so (the installer extracts it at
+        // install time because useLegacyPackaging=true), and the policy
+        // `allow appdomain apk_data_file:file { ... execute ... }` permits
+        // exec from there. Names must start with "lib" and end with ".so"
+        // or the installer would not extract them; content is NOT
+        // validated, so an executable disguised as a .so is extracted
+        // verbatim with the exec bit set.
         val abis = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP)
             Build.SUPPORTED_ABIS.toList() else listOf(@Suppress("DEPRECATION") Build.CPU_ABI)
-        val binDir = File(workDir, "bin")
+        val nativeDir = File(context.applicationInfo.nativeLibraryDir)
         for (abi in abis) {
-            val candidate = File(binDir, "node-$abi")
-            if (candidate.exists()) return candidate
+            // Preferred: extracted nativeLibraryDir binary (Android 10+,
+            // and every version when the installer extracted jniLibs).
+            val native = File(nativeDir, "libnode-$abi.so")
+            if (native.exists() && native.canExecute()) return native
+            // Fallback for legacy installs / ancient devices that still
+            // allow data-dir exec: the filesDir copy shipped in the
+            // toolbox tar (pre-v1.0.7 layout, kept for minSdk 24-28).
+            val legacy = File(File(workDir, "bin"), "node-$abi")
+            if (legacy.exists()) return legacy
         }
         return null
     }
 
     private fun resolveAgentBrowser(workDir: File): File? {
+        // Same W^X story as resolveNodeBinary(): prefer the jniLibs copy
+        // extracted into nativeLibraryDir (exec-able on Android 10+),
+        // fall back to the filesDir copy for ancient devices only.
         val abis = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP)
             Build.SUPPORTED_ABIS.toList() else listOf(@Suppress("DEPRECATION") Build.CPU_ABI)
+        val nativeDir = File(context.applicationInfo.nativeLibraryDir)
         val binDir = File(workDir, "bin")
         for (abi in abis) {
+            val native = File(nativeDir, "libagentbrowser-$abi.so")
+            if (native.exists() && native.canExecute()) return native
             val candidate = File(binDir, "agent-browser-$abi")
             if (candidate.exists()) return candidate
         }
@@ -724,6 +787,30 @@ internal class TarExtractor(private val input: InputStream) {
                 .waitFor()
         } catch (_: Exception) {
             // Old behavior: no symlink — the require() path still works.
+        }
+    }
+
+    /// v1.0.7 W^X: symlink with an ABSOLUTE target (the nativeLibraryDir
+    /// node binary). Same API-26 NIO / API-24 ln fallbacks as
+    /// createSymlink, same best-effort semantics — the only difference is
+    /// the target is already absolute, not tar-relative.
+    private fun createSymlinkAbsolute(link: File, target: File) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                java.nio.file.Files.createSymbolicLink(
+                    link.toPath(),
+                    target.absoluteFile.toPath(),
+                )
+                return
+            }
+        } catch (_: Exception) {
+        }
+        try {
+            ProcessBuilder("ln", "-sfn", target.absolutePath, link.absolutePath)
+                .redirectErrorStream(true)
+                .start()
+                .waitFor()
+        } catch (_: Exception) {
         }
     }
 
