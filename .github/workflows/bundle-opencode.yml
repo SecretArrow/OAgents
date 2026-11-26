@@ -33,7 +33,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Checkout OAgents
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node 24
         # NOTE: no `cache: npm` — the OAgents repo root has no package-lock.json
@@ -65,7 +65,7 @@ jobs:
       # 1. opencode CLI bundle
       # ------------------------------------------------------------------
       - name: Checkout opencode source (sst/opencode, dev branch)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: sst/opencode
           path: opencode-src

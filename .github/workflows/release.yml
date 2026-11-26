@@ -34,7 +34,7 @@ jobs:
       actions: read     # query + download the bundle workflow's artifact
     steps:
       - name: Checkout OAgents
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Find latest successful bundle run on main
         # bundle-opencode.yml runs on every push to main and uploads the

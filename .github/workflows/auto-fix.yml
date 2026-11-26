@@ -24,7 +24,7 @@ jobs:
         # default token do not re-trigger workflows, which pairs with the
         # [skip ci] commit message to keep this loop-free. No PAT secret
         # (OAGENTS_CI_TOKEN) needed.
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           fetch-depth: 0
