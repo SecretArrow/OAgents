@@ -426,6 +426,30 @@ class OpencodeRuntimeBridge(private val context: Context) {
         }
     }
 
+    /// v1.0.7 W^X: symlink with an ABSOLUTE target (the nativeLibraryDir
+    /// node binary). Same API-26 NIO / API-24 ln fallbacks as the tar
+    /// extractor's createSymlink, same best-effort semantics — the only
+    /// difference is the target is already absolute, not tar-relative.
+    private fun createSymlinkAbsolute(link: File, target: File) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                java.nio.file.Files.createSymbolicLink(
+                    link.toPath(),
+                    target.absoluteFile.toPath(),
+                )
+                return
+            }
+        } catch (_: Exception) {
+        }
+        try {
+            ProcessBuilder("ln", "-sfn", target.absolutePath, link.absolutePath)
+                .redirectErrorStream(true)
+                .start()
+                .waitFor()
+        } catch (_: Exception) {
+        }
+    }
+
     private fun deviceAbi(): String =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP)
             Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown"
@@ -787,30 +811,6 @@ internal class TarExtractor(private val input: InputStream) {
                 .waitFor()
         } catch (_: Exception) {
             // Old behavior: no symlink — the require() path still works.
-        }
-    }
-
-    /// v1.0.7 W^X: symlink with an ABSOLUTE target (the nativeLibraryDir
-    /// node binary). Same API-26 NIO / API-24 ln fallbacks as
-    /// createSymlink, same best-effort semantics — the only difference is
-    /// the target is already absolute, not tar-relative.
-    private fun createSymlinkAbsolute(link: File, target: File) {
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                java.nio.file.Files.createSymbolicLink(
-                    link.toPath(),
-                    target.absoluteFile.toPath(),
-                )
-                return
-            }
-        } catch (_: Exception) {
-        }
-        try {
-            ProcessBuilder("ln", "-sfn", target.absolutePath, link.absolutePath)
-                .redirectErrorStream(true)
-                .start()
-                .waitFor()
-        } catch (_: Exception) {
         }
     }
 
