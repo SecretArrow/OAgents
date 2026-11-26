@@ -16,6 +16,7 @@ class LlmConfig {
     required this.authToken,
     required this.model,
     this.maxTokens,
+    this.sessionId = '',
   });
 
   /// Base URL of the opencode server, e.g. `http://192.168.1.10:4096`.
@@ -33,6 +34,13 @@ class LlmConfig {
   /// opencode frontends ignore it; kept for forward compatibility with
   /// Anthropic-shaped backends that require `max_tokens`.
   final int? maxTokens;
+
+  /// v1.0.8: pins this turn to ONE opencode session (the CLI's
+  /// `opencode --continue` semantics). Empty = one-shot session, deleted
+  /// after the turn (pre-v1.0.8 behavior). The embedded adapter creates a
+  /// session on first use and echoes its id back in the stream so the
+  /// caller can persist it on the chat.
+  final String sessionId;
 }
 
 /// A tool call requested by the model (arguments still raw JSON string).
@@ -77,6 +85,7 @@ class AssistantTurn {
     required this.content,
     this.toolCalls = const <ToolCallRequest>[],
     this.usage,
+    this.sessionId = '',
   });
 
   final String content;
@@ -85,6 +94,11 @@ class AssistantTurn {
   /// Token usage reported by the server for this turn (null when the
   /// server does not report it or the stream was cut short).
   final TokenUsage? usage;
+
+  /// v1.0.8: the opencode session id that served this turn (echoed by the
+  /// embedded adapter in the stream's first chunk). Empty on servers that
+  /// do not pin sessions — the caller keeps whatever it had.
+  final String sessionId;
 
   bool get hasToolCalls => toolCalls.isNotEmpty;
 }

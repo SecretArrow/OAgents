@@ -44,6 +44,12 @@ class MockOpencodeServer {
   /// Number of `/chat/completions` requests received (any outcome).
   int chatCalls = 0;
 
+  /// v1.0.8: when set, the streaming reply pins this opencode session id
+  /// in its first chunk even when the request carried none (simulates the
+  /// adapter minting a session for a fresh chat). Tests assert the client
+  /// captures it on the returned AssistantTurn.
+  String? pinnedSessionIdForChat;
+
   /// Binds the server on `127.0.0.1` on [port] (0 = ephemeral) and returns
   /// the started instance. After this returns, [base] is usable.
   static Future<MockOpencodeServer> start({int port = 0}) async {
@@ -98,6 +104,10 @@ class MockOpencodeServer {
 
   Future<void> _handle(HttpRequest request) async {
     final String path = request.uri.path;
+    if (path.startsWith('/api/session')) {
+      await _apiSession(request, path);
+      return;
+    }
     switch (path) {
       case '/health':
         _health(request);
@@ -113,6 +123,64 @@ class MockOpencodeServer {
         _notFound(request);
         return;
     }
+  }
+
+  /// v1.0.8: minimal opencode /api/session surface the app talks to
+  /// through the adapter's verbatim /api/* passthrough:
+  ///
+  ///   GET  /api/session            → {"data":[Session.Info,…]}
+  ///   POST /api/session            → {"data":{…new session…}}
+  ///   POST /api/session/{id}/model → 204, records the switch
+  ///
+  /// Created sessions get ids `ses_test_<n>`; [sessionModels] maps a
+  /// session id to its last-switched model so tests can assert switches.
+  final Map<String, String> sessionModels = <String, String>{};
+  final List<Map<String, dynamic>> _sessions = <Map<String, dynamic>>[
+    <String, dynamic>{
+      'id': 'ses_test_cli_1',
+      'title': 'CLI session one',
+      'model': <String, dynamic>{'providerID': 'opencode', 'id': 'glm-4.6'},
+      'time': <String, dynamic>{'created': 1730000000, 'updated': 1730000500},
+    },
+  ];
+
+  Future<void> _apiSession(HttpRequest request, String path) async {
+    final HttpResponse res = request.response;
+    if (request.method == 'GET' && path == '/api/session') {
+      res.statusCode = HttpStatus.ok;
+      res.headers.contentType = ContentType.json;
+      res.write(jsonEncode(<String, dynamic>{'data': _sessions}));
+      await res.close();
+      return;
+    }
+    if (request.method == 'POST' && path == '/api/session') {
+      final int n = _sessions.length + 1;
+      final Map<String, dynamic> s = <String, dynamic>{
+        'id': 'ses_test_$n',
+        'title': '',
+        'time': <String, dynamic>{
+          'created': 1730001000 + n,
+          'updated': 1730001000 + n,
+        },
+      };
+      _sessions.add(s);
+      res.statusCode = HttpStatus.ok;
+      res.headers.contentType = ContentType.json;
+      res.write(jsonEncode(<String, dynamic>{'data': s}));
+      await res.close();
+      return;
+    }
+    // POST /api/session/{id}/model
+    final Match? m = RegExp(r'^/api/session/([^/]+)/model$').firstMatch(path);
+    if (request.method == 'POST' && m != null) {
+      final String id = m.group(1)!;
+      sessionModels[id] = 'switched';
+      res.statusCode = HttpStatus.noContent;
+      res.contentLength = 0;
+      await res.close();
+      return;
+    }
+    _notFound(request);
   }
 
   void _health(HttpRequest request) {
@@ -152,11 +220,20 @@ class MockOpencodeServer {
     );
     String lastUserContent = '';
     bool streamFlag = true;
+    String requestSessionId = '';
+    String requestModel = '';
     try {
       final dynamic decoded = jsonDecode(utf8.decode(bodyBytes));
       if (decoded is Map<String, dynamic>) {
         final Object? stream = decoded['stream'];
         if (stream is bool) streamFlag = stream;
+        // v1.0.8 session pinning fields (adapter contract): a pinned run
+        // reuses the chat's opencode session; a model switch applies to
+        // that session. Both are echoed back so tests can assert them.
+        final Object? sid = decoded['sessionID'];
+        if (sid is String) requestSessionId = sid;
+        final Object? m = decoded['model'];
+        if (m is String) requestModel = m;
         final Object? messages = decoded['messages'];
         if (messages is List) {
           for (final Object? m in messages) {
@@ -203,7 +280,29 @@ class MockOpencodeServer {
 
     final bool wantsTool = lastUserContent.toLowerCase().contains('tool');
 
-    final List<String> events = <String>[];
+    // v1.0.8: first chunk carries the pinned session id (and, for a fresh
+    // chat, the id the adapter minted). Mirrors the embedded adapter so
+    // the client's session-capture path is exercised. Only emitted when
+    // there is a session to announce — a request without sessionID and
+    // without [pinnedSessionIdForChat] must see the exact pre-v1.0.8
+    // chunk sequence (the abort/force-cancel tests depend on it).
+    final String? announceSession = requestSessionId.isNotEmpty
+        ? requestSessionId
+        : pinnedSessionIdForChat;
+    final List<String> events = <String>[
+      if (announceSession != null)
+        jsonEncode(<String, dynamic>{
+          'choices': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'delta': <String, dynamic>{
+                'role': 'assistant',
+                'sessionID': announceSession,
+                if (requestModel.isNotEmpty) 'model': requestModel,
+              },
+            },
+          ],
+        }),
+    ];
     if (wantsTool) {
       events.add(
         jsonEncode(<String, dynamic>{

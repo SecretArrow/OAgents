@@ -12,15 +12,24 @@ import '../theme.dart';
 import 'paged_list.dart';
 
 /// Top-bar chip showing the active model; opens the picker sheet.
+///
+/// v1.0.8: the chip is PER-CHAT — it shows the displayed chat's model
+/// override (set through this same picker, the CLI's /model command) and
+/// falls back to the app-wide default when the chat has none. Switching
+/// chats updates the chip live through [ChatState.opencodeModel].
 class ModelChip extends ConsumerWidget {
   const ModelChip({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final AppStrings strings = stringsOf(context);
-    final String model = ref.watch(
+    final String appDefault = ref.watch(
       settingsProvider.select((s) => s.opencodeModel),
     );
+    final String chatModel = ref.watch(
+      chatControllerProvider.select((s) => s.opencodeModel),
+    );
+    final String model = chatModel.isNotEmpty ? chatModel : appDefault;
     final bool ready = ref.watch(
       opencodeRuntimeProvider.select((b) => b.currentStatus.isReady),
     );
@@ -103,8 +112,15 @@ class _ModelPickerSheetState extends ConsumerState<ModelPickerSheet> {
   @override
   void initState() {
     super.initState();
+    // Seed the custom field with the per-chat model when the chat has one,
+    // else the app-wide default — mirrors what the chip displays.
+    final chatModel = ref.read(
+      chatControllerProvider.select((s) => s.opencodeModel),
+    );
     _customController = TextEditingController(
-      text: ref.read(settingsProvider).opencodeModel,
+      text: chatModel.isNotEmpty
+          ? chatModel
+          : ref.read(settingsProvider).opencodeModel,
     );
     _reload();
   }
@@ -146,9 +162,18 @@ class _ModelPickerSheetState extends ConsumerState<ModelPickerSheet> {
   void _select(String model) {
     final String trimmed = model.trim();
     if (trimmed.isEmpty) return;
-    ref
-        .read(settingsProvider.notifier)
-        .update(ref.read(settingsProvider).copyWith(opencodeModel: trimmed));
+    // v1.0.8: per-chat model (the CLI's /model command). With a chat open
+    // the choice applies to THAT chat only and is pushed to its opencode
+    // session server-side; without one (fresh app, no chat yet) it lands
+    // in the app-wide default like before.
+    final hasChat = ref.read(chatControllerProvider).sessionId != null;
+    if (hasChat) {
+      ref.read(chatControllerProvider.notifier).setChatModel(trimmed);
+    } else {
+      ref
+          .read(settingsProvider.notifier)
+          .update(ref.read(settingsProvider).copyWith(opencodeModel: trimmed));
+    }
     Navigator.of(context).pop();
   }
 
@@ -343,10 +368,18 @@ class _ModelPickerSheetState extends ConsumerState<ModelPickerSheet> {
   }
 
   Widget _modelTile(OpencodeModel model, AppStrings strings) {
-    final String active = ref.watch(
+    // v1.0.8: selection is per-chat — the chat's override wins, the
+    // app-wide default shows as a secondary hint (the CLI shows the
+    // session's model the same way).
+    final String chatModel = ref.watch(
+      chatControllerProvider.select((s) => s.opencodeModel),
+    );
+    final String appDefault = ref.watch(
       settingsProvider.select((s) => s.opencodeModel),
     );
+    final String active = chatModel.isNotEmpty ? chatModel : appDefault;
     final bool selected = model.id == active;
+    final bool isFallback = chatModel.isEmpty && model.id == appDefault;
     return ListTile(
       dense: true,
       leading: Icon(
@@ -362,7 +395,13 @@ class _ModelPickerSheetState extends ConsumerState<ModelPickerSheet> {
         style: const TextStyle(fontSize: 13.5, fontFamily: 'monospace'),
       ),
       subtitle: model.name.isEmpty || model.name == model.id
-          ? null
+          ? (isFallback
+                ? Text(
+                    'app default',
+                    maxLines: 1,
+                    style: TextStyle(fontSize: 11, color: context.zMuted),
+                  )
+                : null)
           : Text(
               model.name,
               maxLines: 1,

@@ -244,6 +244,19 @@ class ThrowingChatStore implements ChatStore {
   @override
   Future<void> saveModules(String id, List<String> modules) async {}
 
+  // v1.0.8 opencode session pinning + per-chat model (CLI semantics).
+  @override
+  Future<String> loadOcSessionId(String id) async => '';
+
+  @override
+  Future<String> loadOcModel(String id) async => '';
+
+  @override
+  Future<void> saveOcSessionId(String id, String ocSessionId) async {}
+
+  @override
+  Future<void> saveOcModel(String id, String model) async {}
+
   @override
   Future<bool> loadWaitingForSetup(String id) async => false;
 
@@ -270,6 +283,9 @@ class ThrowingChatStore implements ChatStore {
 /// immediately from a map and behaves like the disk store for the purposes
 /// of the UI (sessions persist across screens within one test).
 class MemoryChatStore implements ChatStore {
+  final Map<String, String> _ocSessions = <String, String>{};
+  final Map<String, String> _ocModels = <String, String>{};
+
   MemoryChatStore([Map<String, SessionBundle>? seed])
     : _sessions = <String, SessionBundle>{...?seed};
 
@@ -341,6 +357,23 @@ class MemoryChatStore implements ChatStore {
     );
     _titles[id] = title;
     _updatedAt[id] = DateTime.now();
+  }
+
+  // v1.0.8 opencode session pinning + per-chat model (CLI semantics).
+  @override
+  Future<String> loadOcSessionId(String id) async => _ocSessions[id] ?? '';
+
+  @override
+  Future<String> loadOcModel(String id) async => _ocModels[id] ?? '';
+
+  @override
+  Future<void> saveOcSessionId(String id, String ocSessionId) async {
+    _ocSessions[id] = ocSessionId;
+  }
+
+  @override
+  Future<void> saveOcModel(String id, String model) async {
+    _ocModels[id] = model;
   }
 
   @override
@@ -706,7 +739,21 @@ List<Override> testOverrides({
 /// store's disk IO never completes inside the async test zone (which left
 /// `isLoading` — and the send button's spinner — stuck on forever, timing
 /// out every pumpAndSettle).
+
 class InMemoryChatStore implements ChatStore {
+  // v1.0.8 opencode session pinning (no-op defaults).
+  @override
+  Future<String> loadOcSessionId(String id) async => '';
+
+  @override
+  Future<String> loadOcModel(String id) async => '';
+
+  @override
+  Future<void> saveOcSessionId(String id, String ocSessionId) async {}
+
+  @override
+  Future<void> saveOcModel(String id, String model) async {}
+
   InMemoryChatStore({
     Map<String, List<ChatMessage>>? sessions,
     this.summaries = const <ChatSummary>[],

@@ -136,12 +136,20 @@ final documentsDirProvider = Provider<DocumentsDirResolver>(
 
 /// Builds the [LlmConfig] for the embedded opencode runtime. OAgents has
 /// exactly one AI backend: opencode running IN the app on
-/// [embeddedOpencodeUrl] (localhost, no auth). The only user-tunable field
-/// is the model id; everything else is fixed by the embedded architecture.
-LlmConfig resolveOpencodeLlmConfig(AppSettings settings) => LlmConfig(
+/// [embeddedOpencodeUrl] (localhost, no auth). The user-tunable fields are
+/// the model id and — v1.0.8 — the per-chat overrides: [sessionId] pins
+/// the turn to the chat's opencode session (CLI `--continue` semantics)
+/// and [model] (when set) beats the app-wide default so each chat can
+/// talk to a different model.
+LlmConfig resolveOpencodeLlmConfig(
+  AppSettings settings, {
+  String sessionId = '',
+  String model = '',
+}) => LlmConfig(
   serverUrl: embeddedOpencodeUrl,
   authToken: '',
-  model: settings.opencodeModel,
+  model: model.isNotEmpty ? model : settings.opencodeModel,
+  sessionId: sessionId,
 );
 
 /// The embedded opencode runtime bridge. Singleton — there is exactly one
@@ -604,6 +612,19 @@ final planPanelOpenProvider = StateProvider<bool>((ref) => false);
 final chatListProvider = FutureProvider<List<ChatSummary>>(
   (ref) => ref.watch(chatStoreProvider).listSummaries(),
 );
+
+/// v1.0.8: opencode CLI sessions (`GET /api/session` through the embedded
+/// adapter) — the SAME list the opencode CLI shows when resuming a
+/// conversation. The drawer's "opencode sessions" section renders it and
+/// a tap adopts one as a new app chat (history continues server-side,
+/// `opencode --continue` semantics). Re-fetch with `ref.invalidate`.
+final ocSessionListProvider = FutureProvider<List<OpencodeSession>>((ref) {
+  final bridge = ref.watch(opencodeRuntimeProvider);
+  if (!bridge.currentStatus.isReady) return const <OpencodeSession>[];
+  return ref
+      .watch(opencodeClientProvider)
+      .listSessions(serverUrl: embeddedOpencodeUrl);
+});
 
 /// Installed chat modules (reactive across the Modules screen, the
 /// /plugins menu and the new-chat chips).

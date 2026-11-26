@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../di.dart';
 import '../../l10n/app_strings.dart';
 import '../../models/models.dart';
+import '../../services/opencode_client.dart';
+import '../../services/opencode_runtime.dart';
 import '../screens/files_screen.dart';
 import '../screens/prompt_library_screen.dart';
 import '../screens/search_screen.dart';
@@ -420,8 +422,14 @@ class ChatDrawer extends ConsumerWidget {
               ),
             ),
             const Divider(height: 1),
-            // Session import/export + export chat + token stats as
-            // icon-only actions (v1.34.0, extended in v1.37.0).
+            // v1.0.8: opencode CLI sessions — the same list `opencode`
+            // shows when resuming a conversation. Tapping one adopts it as
+            // a new app chat: the first prompt continues the server-side
+            // history (opencode --continue semantics), the session's model
+            // carries over as the chat's model override. Collapsed by
+            // default so the app-chat history stays the primary list.
+            const _OcSessionsSection(),
+            const Divider(height: 1),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 8),
               child: Row(
@@ -555,6 +563,134 @@ class _RenameChatDialogState extends State<_RenameChatDialog> {
           onPressed: () => Navigator.of(context).pop(_controller.text),
           child: Text(strings.save),
         ),
+      ],
+    );
+  }
+}
+
+/// v1.0.8: collapsible "opencode sessions" section of the drawer. Lists
+/// the embedded opencode server's sessions (the same list the opencode CLI
+/// resumes from) that are NOT yet adopted by an app chat, and lets the
+/// user adopt one: the new app chat's first prompt continues that
+/// session's server-side history, and its model becomes the chat's model
+/// override. Hidden entirely while the runtime is down.
+class _OcSessionsSection extends ConsumerStatefulWidget {
+  const _OcSessionsSection();
+
+  @override
+  ConsumerState<_OcSessionsSection> createState() => _OcSessionsSectionState();
+}
+
+class _OcSessionsSectionState extends ConsumerState<_OcSessionsSection> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final bool ready = ref.watch(
+      opencodeRuntimeProvider.select((b) => b.currentStatus.isReady),
+    );
+    if (!ready) return const SizedBox.shrink();
+    final AsyncValue<List<OpencodeSession>> sessions = ref.watch(
+      ocSessionListProvider,
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: ListTile(
+            key: const Key('drawer-oc-sessions-toggle'),
+            dense: true,
+            leading: const Icon(Icons.terminal_rounded, size: 20),
+            title: const Text('opencode sessions'),
+            trailing: Icon(
+              _open ? Icons.expand_less_rounded : Icons.expand_more_rounded,
+              size: 20,
+            ),
+            onTap: () {
+              setState(() => _open = !_open);
+              if (_open) ref.invalidate(ocSessionListProvider);
+            },
+          ),
+        ),
+        if (_open)
+          sessions.when(
+            loading: () => const Padding(
+              padding: EdgeInsets.all(12),
+              child: Center(
+                child: SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            ),
+            error: (Object e, StackTrace st) => Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text(
+                'Could not load opencode sessions.',
+                style: TextStyle(color: context.zMuted, fontSize: 12),
+              ),
+            ),
+            data: (List<OpencodeSession> items) {
+              if (items.isEmpty) {
+                return Padding(
+                  padding: const EdgeInsets.fromLTRB(28, 4, 16, 8),
+                  child: Text(
+                    'No opencode sessions yet — they appear here after the '
+                    'CLI or this app talks to opencode.',
+                    style: TextStyle(color: context.zMuted, fontSize: 12),
+                  ),
+                );
+              }
+              return ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 220),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: items.length,
+                  itemBuilder: (BuildContext context, int index) {
+                    final OpencodeSession s = items[index];
+                    return ListTile(
+                      key: Key('drawer-oc-session-${s.id}'),
+                      dense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 28,
+                      ),
+                      leading: const Icon(
+                        Icons.terminal_rounded,
+                        size: 16,
+                        color: kMutedTextColor,
+                      ),
+                      title: Text(
+                        s.title.isEmpty ? s.id : s.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                      subtitle: s.model.isEmpty
+                          ? null
+                          : Text(
+                              s.model,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                color: context.zMuted,
+                                fontFamily: 'monospace',
+                              ),
+                            ),
+                      onTap: () {
+                        Navigator.of(context).pop();
+                        ref
+                            .read(chatControllerProvider.notifier)
+                            .adoptOcSession(s);
+                      },
+                    );
+                  },
+                ),
+              );
+            },
+          ),
       ],
     );
   }

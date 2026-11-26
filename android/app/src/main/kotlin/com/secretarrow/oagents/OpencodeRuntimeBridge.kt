@@ -96,6 +96,15 @@ class OpencodeRuntimeBridge(private val context: Context) {
         private const val INTERNAL_PORT = 4097
         private const val SERVER_PASSWORD = "oagents"
         private const val HEALTH_URL = "http://127.0.0.1:$PORT/health"
+        // v1.0.8: readiness polls the UPSTREAM opencode server directly
+        // (Basic-auth /api/info), NOT the adapter's /health. The adapter's
+        // /health does an upstream round-trip with a 1.5s timeout and returns
+        // 503 while opencode is still booting — polling it made a slow cold
+        // start (Node loading a 51MB bundle) look like a failed start, and
+        // the sync fetch in the adapter's health handler serialized behind
+        // every other request. The upstream is the source of truth anyway.
+        private const val UPSTREAM_INFO_URL =
+            "http://127.0.0.1:$INTERNAL_PORT/api/info"
         // Revision file written into the extracted toolbox so we can skip
         // re-extraction when the bundled revision has not changed.
         private const val EXTRACTED_REV = ".extracted-revision"
@@ -156,7 +165,22 @@ class OpencodeRuntimeBridge(private val context: Context) {
 
     private fun start() {
         try {
-            emit(statusMap("extracting"))
+            // v1.0.8: idempotent start. main.dart fires ensureReady() at
+            // boot AND the setup screen / chat gate fire it on demand —
+            // two overlapping starts used to spawn two node servers (the
+            // second dying on EADDRINUSE, flipping the status to failed
+            // WHILE the first was still booting). When a start attempt is
+            // already in flight or the server is up, just report the
+            // current state instead of racing a second process. The
+            // "starting" claim is set inside the same synchronized block
+            // so a concurrent caller sees it immediately.
+            synchronized(this) {
+                val cur = status.get()["state"] as? String
+                if (cur == "running" || cur == "starting" || cur == "extracting") {
+                    return
+                }
+                status.set(statusMap("starting"))
+            }
             val workDir = File(context.filesDir, ASSET_DIR).apply { mkdirs() }
             val revision = readBundledVersion()
 
@@ -174,6 +198,12 @@ class OpencodeRuntimeBridge(private val context: Context) {
             val needExtract = !marker.exists() ||
                 runCatching { marker.readText().trim() }.getOrNull() != revision
             if (needExtract) {
+                // v1.0.8: claim the state BEFORE the long extraction so a
+                // concurrent start() sees "extracting" and backs off (see
+                // the guard above), and so the UI shows the true phase —
+                // cold start extraction, not a phantom one. On re-extract
+                // this can take a minute for the ~558MB toolbox.
+                emit(statusMap("extracting", revision = revision))
                 extractToolboxTar(workDir)
                 marker.writeText(revision)
             }
@@ -375,13 +405,20 @@ class OpencodeRuntimeBridge(private val context: Context) {
                 }
             }
 
-            val ready = waitForHealth(timeoutMs = 25_000)
+            val ready = waitForHealth(timeoutMs = 90_000)
             if (ready) {
                 emit(statusMap("running", revision = revision, version = revision))
+                // v1.0.8: keep watching after "running" — Android's LMK can
+                // kill the node child at any time and the UI would otherwise
+                // show a stale green badge forever (the "always says running
+                // but chat is dead" bug). The watcher flips the status to
+                // "stopped" the moment the process exits, so the user sees
+                // the truth and can tap start again.
+                watchProcessHealth()
             } else {
                 emit(statusMap(
                     "failed",
-                    message = "opencode did not answer /health within 25s. " +
+                    message = "opencode did not answer /health within 90s. " +
                         "Check that opencode.bundle.js is a valid Node bundle and " +
                         "that the node-<abi> binary matches this device.",
                     revision = revision,
@@ -563,12 +600,24 @@ class OpencodeRuntimeBridge(private val context: Context) {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
             try {
-                val url = java.net.URL(HEALTH_URL)
+                // v1.0.8: poll the upstream opencode server itself
+                // (GET /api/info with the Basic pair it requires). A 200
+                // here means opencode is serving — the adapter on PORT
+                // comes up independently and its own /health does another
+                // upstream round-trip, so using it here made readiness
+                // depend on the adapter AND timing.
+                val url = java.net.URL(UPSTREAM_INFO_URL)
                 val conn = url.openConnection() as java.net.HttpURLConnection
-                conn.connectTimeout = 1000
-                conn.readTimeout = 1000
+                conn.connectTimeout = 1500
+                conn.readTimeout = 1500
                 conn.requestMethod = "GET"
-                conn.inputStream.use { it.read() }
+                conn.setRequestProperty(
+                    "Authorization",
+                    "Basic " + android.util.Base64.encodeToString(
+                        "opencode:$SERVER_PASSWORD".toByteArray(),
+                        android.util.Base64.NO_WRAP,
+                    ),
+                )
                 val code = conn.responseCode
                 conn.disconnect()
                 if (code in 200..299) return true
@@ -582,6 +631,60 @@ class OpencodeRuntimeBridge(private val context: Context) {
             }
         }
         return false
+    }
+
+    /// v1.0.8: post-"running" watchdog. Blocks on the node process (a
+    /// `Process.waitFor()` on a dead child returns immediately), then
+    /// verifies with one upstream probe that the server is really gone
+    /// (the adapter alone surviving must not read as "running"). When the
+    /// child is gone the status flips to "stopped" — the UI badge turns
+    /// grey and the setup screen's start button becomes tappable again.
+    /// Runs on its own daemon thread; a new watcher is started by every
+    /// successful start(), and a stale one (from a previous start) exits
+    /// silently because it watches the OLD Process object.
+    @Volatile private var healthWatcher: Thread? = null
+
+    private fun watchProcessHealth() {
+        val watched = process ?: return
+        try { healthWatcher?.interrupt() } catch (_: Exception) {}
+        healthWatcher = thread(start = true, isDaemon = true, name = "oc-health-watch") {
+            try {
+                watched.waitFor()
+            } catch (_: InterruptedException) {
+                return@thread // superseded by a newer watcher
+            } catch (_: Throwable) {
+            }
+            // The node child died. Only report "stopped" when THIS child is
+            // still the current one (a fresh start() may already have
+            // replaced it) — and probe once more so an alive-but-weird
+            // state does not lie to the UI.
+            if (process === watched) {
+                val stillUp = try {
+                    val url = java.net.URL(UPSTREAM_INFO_URL)
+                    val conn = url.openConnection() as java.net.HttpURLConnection
+                    conn.connectTimeout = 1000
+                    conn.readTimeout = 1000
+                    conn.setRequestProperty(
+                        "Authorization",
+                        "Basic " + android.util.Base64.encodeToString(
+                            "opencode:$SERVER_PASSWORD".toByteArray(),
+                            android.util.Base64.NO_WRAP,
+                        ),
+                    )
+                    val code = conn.responseCode
+                    conn.disconnect()
+                    code !in 200..299
+                } catch (_: Exception) {
+                    true
+                }
+                if (stillUp) {
+                    process = null
+                    adapterProcess?.let { killProcess(it) }
+                    adapterProcess = null
+                    emit(statusMap("stopped"))
+                }
+            }
+        }
     }
 
     private fun readBundledVersion(): String = try {

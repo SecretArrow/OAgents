@@ -17,6 +17,8 @@ import 'llm_client.dart';
 import 'make_plugins.dart';
 import 'module_registry.dart';
 import 'module_runtime.dart';
+import 'opencode_client.dart' show OpencodeSession;
+import 'opencode_runtime.dart' show embeddedOpencodeUrl;
 import 'skill_registry.dart';
 import 'tool_executor.dart';
 
@@ -100,12 +102,19 @@ class ChatState {
     this.waitingForSetup = false,
     this.pendingModuleInstall,
     this.pendingConfirmation,
+    this.opencodeModel = '',
   });
 
   final String? sessionId;
   final String title;
   final List<ChatMessage> messages;
   final bool isRunning;
+
+  /// v1.0.8: the displayed chat's model override ('' = app default from
+  /// settings). Set through the chat screen's model picker — the picker
+  /// applies it to the chat's opencode session (CLI /model) and persists
+  /// it, so the choice survives restarts and shows in the chip.
+  final String opencodeModel;
 
   /// True while a stored session is being read from disk after a chat
   /// switch. The screen must show the TARGET chat (empty transcript +
@@ -173,6 +182,7 @@ class ChatState {
     bool? waitingForSetup,
     Object? pendingModuleInstall = _unset,
     Object? pendingConfirmation = _unset,
+    String? opencodeModel,
   }) => ChatState(
     sessionId: sessionId ?? this.sessionId,
     title: title ?? this.title,
@@ -196,6 +206,7 @@ class ChatState {
     pendingConfirmation: pendingConfirmation == _unset
         ? this.pendingConfirmation
         : pendingConfirmation as ConfirmationRequest?,
+    opencodeModel: opencodeModel ?? this.opencodeModel,
   );
 }
 
@@ -325,6 +336,17 @@ class _SessionRun {
   /// once when the user switches back to the chat (see [openChat]) and
   /// authoritatively at turn end.
   StringBuffer? streamingBuffer;
+
+  /// v1.0.8: the opencode session this chat is pinned to (CLI session
+  /// semantics). Empty until the first turn's stream announces the id;
+  /// afterwards every turn reuses it so history persists server-side and
+  /// the CLI's session list shows the same conversation.
+  String ocSessionId = '';
+
+  /// v1.0.8: per-chat model override ("" = app default). Set from the
+  /// chat screen's model picker, applied through the adapter's
+  /// /api/session/{id}/model (the CLI's /model command).
+  String ocModel = '';
 
   bool stopRequested = false;
 
@@ -620,6 +642,15 @@ class ChatController extends Notifier<ChatState> {
         final String sessionId = newId();
         run = _SessionRun(sessionId: sessionId, title: _titleFor(trimmed));
         run.autoTitlePending = true;
+        // v1.0.8: a draft adopted from a CLI session carries its pin —
+        // the first prompt continues THAT opencode session and uses its
+        // model (set via adoptOcSession from the drawer).
+        final adopt = _pendingOcAdopt;
+        if (adopt != null) {
+          run.ocSessionId = adopt.id;
+          run.ocModel = adopt.model;
+          _pendingOcAdopt = null;
+        }
         _runs[sessionId] = run;
         _activeSessionId = sessionId;
         state = ChatState(
@@ -630,6 +661,7 @@ class ChatController extends Notifier<ChatState> {
           // fresh state mirrors them so the composer chip stays truthful.
           activeSkills: [...stagedSkills],
           isRunning: true,
+          opencodeModel: run.ocModel,
         );
       }
     } else if (_activeSessionId == run.sessionId) {
@@ -2020,7 +2052,26 @@ class ChatController extends Notifier<ChatState> {
       ..._buildWire(run, run.messages),
     ];
 
-    final config = resolveOpencodeLlmConfig(settings);
+    // v1.0.8: lazy-load the chat's pinned opencode session + per-chat
+    // model on the FIRST turn of this run object (later turns reuse the
+    // values already on the run; the persist below keeps them warm for
+    // the next run). The session id pins every turn of this chat to ONE
+    // opencode session — CLI semantics, history persists server-side.
+    if (run.ocSessionId.isEmpty) {
+      run.ocSessionId = await ref
+          .read(chatStoreProvider)
+          .loadOcSessionId(run.sessionId);
+    }
+    if (run.ocModel.isEmpty) {
+      run.ocModel = await ref
+          .read(chatStoreProvider)
+          .loadOcModel(run.sessionId);
+    }
+    final config = resolveOpencodeLlmConfig(
+      settings,
+      sessionId: run.ocSessionId,
+      model: run.ocModel.isNotEmpty ? run.ocModel : settings.opencodeModel,
+    );
     final tools = settings.agentMode
         ? buildAgentTools(planFirst: settings.planFirst)
         : null;
@@ -2092,6 +2143,21 @@ class ChatController extends Notifier<ChatState> {
         }
         if (run.stopRequested) break;
 
+        // v1.0.8: the first turn of a chat announces the opencode session
+        // id the adapter created/minted for it — persist it so every later
+        // turn (and run) reuses the same session, and the CLI's session
+        // list shows this conversation with its full history.
+        if (turn.sessionId.isNotEmpty && turn.sessionId != run.ocSessionId) {
+          run.ocSessionId = turn.sessionId;
+          if (!run.deleted) {
+            unawaited(
+              ref
+                  .read(chatStoreProvider)
+                  .saveOcSessionId(run.sessionId, turn.sessionId),
+            );
+          }
+        }
+
         final toolCalls = <ToolCall>[
           for (final tc in turn.toolCalls)
             ToolCall(id: tc.id, name: tc.name, arguments: tc.args),
@@ -2101,7 +2167,7 @@ class ChatController extends Notifier<ChatState> {
           ChatMessage.assistant(
             turn.content,
             toolCalls: toolCalls,
-            model: settings.opencodeModel,
+            model: config.model,
             usage: turn.usage,
           ),
         );
@@ -2946,7 +3012,51 @@ class ChatController extends Notifier<ChatState> {
       todos: run.latestTodos,
       setupRequest: run.setupRequest,
       waitingForSetup: run.waitingForSetup,
+      opencodeModel: run.ocModel,
     );
+  }
+
+  /// v1.0.8: the displayed chat's opencode session id (empty until the
+  /// chat's first turn). Exposed for the drawer's CLI-session sync.
+  String activeOcSessionId() {
+    final run = _runs[_activeSessionId];
+    return run?.ocSessionId ?? '';
+  }
+
+  /// v1.0.8: switches the model of the ACTIVE chat — the CLI's /model
+  /// command. Applies to the chat's opencode session when one exists
+  /// (server-side switch via the adapter), persists the override on the
+  /// chat, and updates the run so the very next turn uses it. A chat
+  /// without a session yet just stores the override; the first turn's
+  /// session gets the model applied through the chat/completions body.
+  Future<void> setChatModel(String modelId) async {
+    final id = _activeSessionId;
+    if (id == null) return;
+    final String trimmed = modelId.trim();
+    final run = _runs[id];
+    if (run != null) run.ocModel = trimmed;
+    state = state.copyWith(opencodeModel: trimmed);
+    if (trimmed.isEmpty) return;
+    await ref.read(chatStoreProvider).saveOcModel(id, trimmed);
+    final ocSession =
+        run?.ocSessionId ??
+        await ref.read(chatStoreProvider).loadOcSessionId(id);
+    if (ocSession.isEmpty) return;
+    if (run != null) run.ocSessionId = ocSession;
+    try {
+      await ref
+          .read(opencodeClientProvider)
+          .setSessionModel(
+            serverUrl: embeddedOpencodeUrl,
+            sessionId: ocSession,
+            modelId: trimmed,
+          );
+    } catch (_) {
+      // The persisted override still applies on the next turn (the
+      // adapter sends body.model every time), so a transient server-side
+      // switch failure must not roll the UI back — the chat keeps the
+      // selection and retries naturally.
+    }
   }
 
   /// v1.38.0: rebuilds the last message of [run] while PRESERVING its id.
@@ -3201,6 +3311,8 @@ class ChatController extends Notifier<ChatState> {
       final AssistantTurn turn = await ref
           .read(llmClientProvider)
           .complete(
+            // v1.0.8: one-shot (no sessionId) — title generation must NOT
+            // pollute the chat's opencode session history.
             config: resolveOpencodeLlmConfig(settings),
             tools: null,
             messages: <Map<String, dynamic>>[
@@ -3276,9 +3388,39 @@ class ChatController extends Notifier<ChatState> {
     // a chat the user already navigated away from.
     _chatLoadGeneration++;
     _activeSessionId = null;
+    _pendingOcAdopt = null;
     _restoreStagedAttachments(null);
     state = const ChatState();
   }
+
+  /// v1.0.8: adopts an EXISTING opencode CLI session as a new app chat
+  /// (the drawer's "opencode sessions" section). The chat starts empty —
+  /// its server-side history lives in opencode — but the first prompt
+  /// continues the session, exactly like `opencode --continue <id>` in
+  /// the CLI. The session's current model (provider/model) carries over
+  /// as the chat's model override so the chip shows the truth.
+  Future<void> adoptOcSession(OpencodeSession ocSession) async {
+    if (_activeSessionId != null) {
+      _cancelConfirmationsForSession(_activeSessionId!);
+    }
+    _stashStagedAttachments();
+    _chatLoadGeneration++;
+    _activeSessionId = null;
+    _restoreStagedAttachments(null);
+    // A DRAFT id: persisted only when the first message is sent (the same
+    // lifecycle as any new chat) — but the ocSessionId/model overrides
+    // are staged on a synthetic run so the first send uses them.
+    state = ChatState(
+      title: ocSession.title.isEmpty ? 'opencode session' : ocSession.title,
+      opencodeModel: ocSession.model,
+    );
+    _pendingOcAdopt = ocSession;
+  }
+
+  /// v1.0.8: staged CLI-session adoption (see [adoptOcSession]). Consumed
+  /// by the first send of the draft chat; cleared by a newChat/openChat
+  /// switch so another chat never inherits the pin.
+  OpencodeSession? _pendingOcAdopt;
 
   /// App-start behavior (chat.z.ai style): reopen the most recent
   /// conversation so the first message CONTINUES it. A brand-new chat is
@@ -3335,6 +3477,7 @@ class ChatController extends Notifier<ChatState> {
     }
     // v1.38.1: stash the displayed chat's staged list before switching...
     _stashStagedAttachments();
+    _pendingOcAdopt = null;
     // v1.39.0: invalidate every load still in flight for a previous chat.
     // The old code only compared `_activeSessionId`, which a fast
     // A → B → A switch defeats: A's first (slow) load would commit after

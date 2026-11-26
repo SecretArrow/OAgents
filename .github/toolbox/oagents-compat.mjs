@@ -7,15 +7,27 @@
 // /api/* protocol with HTTP Basic auth (`opencode:<password>`). This adapter
 // bridges the two with zero dependencies:
 //
-//   GET  /health             -> 200 {"ok":true} (bridge + Dart readiness)
+//   GET  /health             -> 200 {"ok":true,"upstream":bool} — always
+//                               200 once the ADAPTER is up; `upstream`
+//                               reports the opencode server separately so
+//                               boot-window polls never see a 503 (v1.0.8)
 //   GET  /models             -> opencode GET /api/model, mapped to OpenAI list
-//   POST /chat/completions   -> opencode POST /api/session + /prompt, then
-//                               /api/event SSE -> OpenAI chunk stream
+//   POST /chat/completions   -> opencode /api/session[/prompt] + /api/event
+//                               SSE -> OpenAI chunk stream.
+//                               v1.0.8: body.sessionID reuses (and returns)
+//                               one persistent opencode session per app chat
+//                               — matching the CLI, where sessions survive
+//                               across prompts. body.model switches that
+//                               session's model first (the CLI's /model
+//                               command) and modelID echoes back in chunks.
+//                               No sessionID = legacy one-shot session,
+//                               deleted after the turn (old behavior).
 //   POST /v1/chat/completions (same handler)
 //   ANY  /api/*               -> proxied VERBATIM to the upstream opencode
 //                               server (the Dart setup UI talks opencode's
 //                               own protocol — /api/credential, /api/model,
-//                               /api/provider — directly through this port)
+//                               /api/session, /api/provider — directly
+//                               through this port)
 //   GET  /openapi.json        -> same passthrough (diagnostics only)
 //
 // Env:
@@ -36,6 +48,12 @@ const UP_AUTH = "Basic " + Buffer.from("opencode:" + PASS).toString("base64")
 // scheduled, never idle) — the watchdog ends the SSE stream with a clear
 // error instead of hanging the chat UI. Configurable for CI smokes.
 const IDLE_TIMEOUT = Number(process.env.OCODE_IDLE_TIMEOUT || 90_000)
+// Cached upstream liveness for /health: refreshed at most every 2s so a
+// health poll storm (bridge + Dart + setup screen) cannot serialize the
+// event loop behind back-to-back upstream fetches (v1.0.8).
+const UP_PROBE_INTERVAL = 2_000
+let upCache = { ok: false, at: 0 }
+let upProbeInflight = null
 
 function log(...a) {
   console.log(new Date().toISOString().slice(11, 19), "[compat]", ...a)
@@ -57,12 +75,12 @@ function sseWrite(res, obj) {
   res.write(`data: ${JSON.stringify(obj)}\n\n`)
 }
 
-function chunk(id, delta, finish = null) {
+function chunk(id, delta, finish = null, model = null) {
   return {
     id,
     object: "chat.completion.chunk",
     created: Math.floor(Date.now() / 1000),
-    model: "opencode",
+    model: model || "opencode",
     choices: [{ index: 0, delta, finish_reason: finish }],
   }
 }
@@ -108,12 +126,17 @@ async function chat(req, res, body) {
   if (!text.trim()) {
     return sseError(res, id, "empty prompt — messages[].content required")
   }
+  // v1.0.8 session pinning: body.sessionID = the app chat's opencode
+  // session (stable across turns, like the CLI); body.model = "provider/id"
+  // switches that session's model first (the CLI's /model command).
+  const sessionID = typeof body?.sessionID === "string" && body.sessionID.trim() ? body.sessionID.trim() : null
+  const model = typeof body?.model === "string" && body.model.trim() ? body.model.trim() : null
   if (!stream) {
     // Non-stream path: same pipeline, buffer until done, then reply once.
     const parts = []
     let err = null
     try {
-      for await (const piece of runPrompt(text)) {
+      for await (const piece of runPrompt(text, { sessionID, model })) {
         if (piece.error) err = piece.error
         else if (piece.text) parts.push(piece.text)
       }
@@ -129,7 +152,7 @@ async function chat(req, res, body) {
       id,
       object: "chat.completion",
       created: Math.floor(Date.now() / 1000),
-      model: "opencode",
+      model: model || "opencode",
       choices: [{ index: 0, message: { role: "assistant", content: parts.join("") }, finish_reason: "stop" }],
     }))
     return
@@ -140,27 +163,34 @@ async function chat(req, res, body) {
     "cache-control": "no-cache",
     connection: "keep-alive",
   })
-  sseWrite(res, chunk(id, { role: "assistant" }))
+  sseWrite(res, chunk(id, { role: "assistant" }, null, model))
   let done = false
   const finish = () => {
     if (done) return
     done = true
-    sseWrite(res, chunk(id, {}, "stop"))
+    sseWrite(res, chunk(id, {}, "stop", model))
     res.write("data: [DONE]\n\n")
     res.end()
   }
   req.on("close", () => { done = true })
   try {
-    for await (const piece of runPrompt(text)) {
+    for await (const piece of runPrompt(text, { sessionID, model })) {
       if (done) break
       if (piece.error) {
-        sseWrite(res, chunk(id, { content: `\n\n[error] ${piece.error}` }))
+        sseWrite(res, chunk(id, { content: `\n\n[error] ${piece.error}` }, null, model))
       } else if (piece.text) {
-        sseWrite(res, chunk(id, { content: piece.text }))
+        sseWrite(res, chunk(id, { content: piece.text }, null, model))
+      } else if (piece.sessionID) {
+        // First emission of a pinned run: tells the app which opencode
+        // session backs this chat (a newly created one when the app had
+        // none yet). Delivered as a chunk with model info so the standard
+        // OpenAI parser can carry it; the app reads `sessionID` off the
+        // delta object.
+        sseWrite(res, chunk(id, { role: "assistant", sessionID: piece.sessionID, model: model || "" }, null, model))
       }
     }
   } catch (e) {
-    if (!done) sseWrite(res, chunk(id, { content: `\n\n[error] ${e?.message ?? e}` }))
+    if (!done) sseWrite(res, chunk(id, { content: `\n\n[error] ${e?.message ?? e}` }, null, model))
   }
   finish()
 }
@@ -205,21 +235,54 @@ async function proxy(req, res, path, query) {
 }
 
 /**
- * Drives one opencode round: create a session, post the prompt, then
- * stream text parts off the /api/event bus until the session goes idle
- * or errors. Yields {text} pieces and a final {error?}.
+ * Drives one opencode round. v1.0.8 session semantics (mirrors the CLI):
+ *
+ *  - opts.sessionID set  -> REUSE that opencode session (created earlier by
+ *    this chat). The session survives the turn — the app's chat list and
+ *    the CLI's session list see the same history. The caller learns the
+ *    id through the first {sessionID} yield when it did not have one yet.
+ *  - opts.sessionID null -> legacy one-shot session, deleted afterwards
+ *    (pre-v1.0.8 behavior).
+ *  - opts.model set      -> `POST /api/session/{id}/model` BEFORE the
+ *    prompt (the CLI's /model command); "provider/id" is split into
+ *    {providerID, id}. Cleared per session, not global.
+ *
+ * Yields {sessionID} once, then {text} pieces and a final {error?}.
  */
-async function* runPrompt(text) {
-  const sr = await up("/api/session", { method: "POST", body: JSON.stringify({}) })
-  if (!sr.ok) {
-    yield { error: `opencode session create failed (${sr.status}): ${(await sr.text()).slice(0, 300)}` }
-    return
-  }
-  const sbody = await readJson(sr)
-  const sessionID = sbody?.data?.id
+async function* runPrompt(text, opts = {}) {
+  let sessionID = opts.sessionID || null
+  const model = opts.model || null
+  const keep = !!sessionID
+
   if (!sessionID) {
-    yield { error: `opencode session response missing id: ${JSON.stringify(sbody).slice(0, 200)}` }
-    return
+    const sr = await up("/api/session", { method: "POST", body: JSON.stringify({}) })
+    if (!sr.ok) {
+      yield { error: `opencode session create failed (${sr.status}): ${(await sr.text()).slice(0, 300)}` }
+      return
+    }
+    const sbody = await readJson(sr)
+    sessionID = sbody?.data?.id
+    if (!sessionID) {
+      yield { error: `opencode session response missing id: ${JSON.stringify(sbody).slice(0, 200)}` }
+      return
+    }
+  }
+  // Tell the caller which session backs this chat (newly minted ids in
+  // particular — the app persists it on the chat and reuses it next turn).
+  if (keep || opts.sessionID == null) yield { sessionID }
+
+  // Per-session model switch (CLI /model). "provider/id" → Model.Ref.
+  if (model && model.includes("/")) {
+    const sep = model.indexOf("/")
+    const mr = await up(`/api/session/${sessionID}/model`, {
+      method: "POST",
+      body: JSON.stringify({ model: { providerID: model.slice(0, sep), id: model.slice(sep + 1) } }),
+    })
+    if (!mr.ok) {
+      // A bad/unknown model id must not kill the turn — opencode keeps the
+      // session's previous model. Surface the reason; the app shows it.
+      yield { error: `model switch to ${model} failed (${mr.status}): ${(await mr.text()).slice(0, 200)}` }
+    }
   }
 
   // Subscribe FIRST so no event is lost between prompt and listener.
@@ -235,7 +298,9 @@ async function* runPrompt(text) {
   })
   if (!pr.ok) {
     yield { error: `opencode prompt failed (${pr.status}): ${(await pr.text()).slice(0, 300)}` }
-    try { await up(`/api/session/${sessionID}`, { method: "DELETE" }) } catch {}
+    if (!keep) {
+      try { await up(`/api/session/${sessionID}`, { method: "DELETE" }) } catch {}
+    }
     return
   }
 
@@ -306,7 +371,12 @@ async function* runPrompt(text) {
     }
   } finally {
     try { await reader.cancel() } catch {}
-    try { await up(`/api/session/${sessionID}`, { method: "DELETE" }) } catch {}
+    // One-shot (legacy) runs delete their session so no orphan history
+    // piles up on the server; pinned runs keep theirs — that history IS
+    // the app chat's opencode-side memory (the CLI sees it too).
+    if (!keep) {
+      try { await up(`/api/session/${sessionID}`, { method: "DELETE" }) } catch {}
+    }
   }
 }
 
@@ -316,23 +386,35 @@ async function* runPrompt(text) {
 const server = http.createServer(async (req, res) => {
   const url = (req.url || "/").split("?")[0]
   if (req.method === "GET" && (url === "/health" || url === "/")) {
-    // 200 only when the upstream opencode server is reachable, so the
-    // bridge's readiness poll (and the Dart client) mean "ready to chat".
-    let up_ok = false
-    try {
-      const r = await fetch(UP + "/api/info", {
-        headers: { authorization: UP_AUTH },
-        signal: AbortSignal.timeout(1500),
-      })
-      up_ok = r.status < 500
-    } catch {}
-    if (!up_ok) {
-      res.writeHead(503, { "content-type": "application/json" })
-      res.end(JSON.stringify({ ok: false, adapter: "oagents-compat", upstream: false }))
-      return
+    // v1.0.8: the adapter itself is up -> 200, with `upstream` reported
+    // separately. The old handler returned 503 while opencode was still
+    // booting, so every readiness poll during the boot window saw a
+    // "failed" server; worse, its synchronous 1.5s upstream fetch ran on
+    // the single event loop, serializing /models and /chat behind it.
+    // `upstream` is cached for UP_PROBE_INTERVAL and shared across
+    // concurrent health polls. Consumers that need "ready to chat" check
+    // `upstream === true` (the Dart client reads the JSON body).
+    const now = Date.now()
+    if (now - upCache.at > UP_PROBE_INTERVAL) {
+      if (!upProbeInflight) {
+        upProbeInflight = (async () => {
+          try {
+            const r = await fetch(UP + "/api/info", {
+              headers: { authorization: UP_AUTH },
+              signal: AbortSignal.timeout(1500),
+            })
+            upCache = { ok: r.status < 500, at: Date.now() }
+          } catch {
+            upCache = { ok: false, at: Date.now() }
+          } finally {
+            upProbeInflight = null
+          }
+        })()
+      }
+      await upProbeInflight
     }
     res.writeHead(200, { "content-type": "application/json" })
-    res.end(JSON.stringify({ ok: true, adapter: "oagents-compat", upstream: true }))
+    res.end(JSON.stringify({ ok: true, adapter: "oagents-compat", upstream: upCache.ok }))
     return
   }
   if (req.method === "GET" && (url === "/models" || url === "/v1/models")) {

@@ -71,6 +71,20 @@ List<String>? Function() chatDecodeModulesJob(String raw) => () {
   ];
 };
 
+/// v1.0.8 — decodes the chat's pinned opencode session id ('' when the
+/// chat has not talked to opencode yet). The id is what the CLI's
+/// `opencode` session list shows too: same store, two frontends.
+String Function() chatDecodeOcSessionJob(String raw) => () {
+  final Object? decoded = jsonDecode(raw);
+  return decoded is Map ? (decoded['opencodeSessionId']?.toString() ?? '') : '';
+};
+
+/// v1.0.8 — decodes the chat's per-chat model override ('' = app default).
+String Function() chatDecodeOcModelJob(String raw) => () {
+  final Object? decoded = jsonDecode(raw);
+  return decoded is Map ? (decoded['opencodeModel']?.toString() ?? '') : '';
+};
+
 /// Decodes just the "waiting for module setup" flag.
 bool Function() chatDecodeWaitFlagJob(String raw) => () {
   final Object? decoded = jsonDecode(raw);
@@ -459,6 +473,60 @@ class ChatStore {
         if (updated != null) await _atomicWrite(file, updated);
       } catch (_) {
         // Corrupted file: module bookkeeping must never crash the caller.
+      }
+    });
+  }
+
+  /// v1.0.8: the opencode session id pinned to this chat ('' when it has
+  /// not sent a prompt yet). Read-modify-write like [saveModules].
+  Future<String> loadOcSessionId(String id) async {
+    final dir = await _chatsDir();
+    final file = File('${dir.path}${Platform.pathSeparator}$id.json');
+    if (!await file.exists()) return '';
+    try {
+      final String raw = await file.readAsString();
+      return await _offload(chatDecodeOcSessionJob(raw));
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// v1.0.8: persists the chat's pinned opencode session id (learned from
+  /// the first turn's stream) without touching messages.
+  Future<void> saveOcSessionId(String id, String ocSessionId) =>
+      _patchField(id, 'opencodeSessionId', ocSessionId);
+
+  /// v1.0.8: the chat's per-chat model override ('' = app default).
+  Future<String> loadOcModel(String id) async {
+    final dir = await _chatsDir();
+    final file = File('${dir.path}${Platform.pathSeparator}$id.json');
+    if (!await file.exists()) return '';
+    try {
+      final String raw = await file.readAsString();
+      return await _offload(chatDecodeOcModelJob(raw));
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// v1.0.8: persists the chat's per-chat model override.
+  Future<void> saveOcModel(String id, String model) =>
+      _patchField(id, 'opencodeModel', model);
+
+  /// Shared read-modify-write for the v1.0.8 opencode metadata fields.
+  Future<void> _patchField(String id, String key, Object? value) {
+    return _withLock<void>(id, () async {
+      final dir = await _chatsDir();
+      final file = File('${dir.path}${Platform.pathSeparator}$id.json');
+      if (!await file.exists()) return;
+      try {
+        final String raw = await file.readAsString();
+        final String? updated = await _offload(
+          chatPatchFieldJob(raw, key, value),
+        );
+        if (updated != null) await _atomicWrite(file, updated);
+      } catch (_) {
+        // Corrupted file: opencode metadata must never crash the caller.
       }
     });
   }

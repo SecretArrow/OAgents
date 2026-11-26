@@ -57,6 +57,19 @@ class ScriptedChatStore implements ChatStore {
   @override
   Future<void> saveModules(String id, List<String> modules) async {}
 
+  // v1.0.8 opencode session pinning + per-chat model (CLI semantics).
+  @override
+  Future<String> loadOcSessionId(String id) async => '';
+
+  @override
+  Future<String> loadOcModel(String id) async => '';
+
+  @override
+  Future<void> saveOcSessionId(String id, String ocSessionId) async {}
+
+  @override
+  Future<void> saveOcModel(String id, String model) async {}
+
   @override
   Future<bool> loadWaitingForSetup(String id) async => false;
 

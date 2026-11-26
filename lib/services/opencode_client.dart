@@ -95,6 +95,60 @@ class OpencodeCredential {
       'OpencodeCredential($integrationID, label=$label, active=$active)';
 }
 
+/// One opencode session as listed by `GET /api/session` — the same list
+/// the opencode CLI shows when resuming a conversation. v1.0.8: the app's
+/// chat list and the CLI's session list are two views of the same store;
+/// this model is the bridge. [model] is the session's current
+/// `providerID/modelID` (shown in the chat drawer, switchable).
+class OpencodeSession {
+  const OpencodeSession({
+    required this.id,
+    this.title = '',
+    this.model = '',
+    this.agent = '',
+    required this.updatedAt,
+    this.parentID = '',
+  });
+
+  final String id;
+  final String title;
+
+  /// `providerID/modelID` — the model this session talks to right now.
+  final String model;
+
+  /// Agent name ("build"/"plan"/custom) when the session pinned one.
+  final String agent;
+
+  final DateTime updatedAt;
+
+  /// Set when this session was forked off another one.
+  final String parentID;
+
+  factory OpencodeSession.fromJson(Map<String, dynamic> json) {
+    final dynamic time = json['time'];
+    final dynamic model = json['model'];
+    final String modelId = model is Map<String, dynamic>
+        ? '${model['providerID'] ?? ''}/${model['id'] ?? ''}'
+        : '';
+    final int? updatedSec = time is Map<String, dynamic>
+        ? (time['updated'] as num?)?.toInt()
+        : null;
+    return OpencodeSession(
+      id: (json['id'] ?? '').toString(),
+      title: (json['title'] ?? '').toString(),
+      model: modelId,
+      agent: (json['agent'] ?? '').toString(),
+      parentID: (json['parentID'] ?? '').toString(),
+      updatedAt: updatedSec == null
+          ? DateTime.now()
+          : DateTime.fromMillisecondsSinceEpoch(updatedSec * 1000),
+    );
+  }
+
+  @override
+  String toString() => 'OpencodeSession($id, model=$model, title=$title)';
+}
+
 /// Thrown when the opencode server cannot be reached or returns a
 /// non-2xx response that is not a normal SSE error event.
 class OpencodeHttpException implements Exception {
@@ -173,6 +227,97 @@ class OpencodeClient {
           .toList();
     } catch (_) {
       return const <OpencodeModel>[];
+    } finally {
+      if (owns) client.close();
+    }
+  }
+
+  /// Lists opencode sessions (`GET /api/session`, proxied verbatim by the
+  /// embedded adapter). These are the SAME sessions the opencode CLI
+  /// lists — v1.0.8 unifies the app's chat list with the CLI's session
+  /// store. Returns an empty list on any failure (never throws).
+  Future<List<OpencodeSession>> listSessions({
+    required String serverUrl,
+    String authToken = '',
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
+    final String base = serverUrl.trim().replaceAll(RegExp(r'/+$'), '');
+    final Uri? uri = Uri.tryParse('$base/api/session?order=desc');
+    if (uri == null) return const <OpencodeSession>[];
+    final http.Client client = _client();
+    final bool owns = _injected == null;
+    try {
+      final http.Response res = await client
+          .get(uri, headers: _headers(authToken))
+          .timeout(timeout);
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        return const <OpencodeSession>[];
+      }
+      final dynamic decoded = jsonDecode(res.body);
+      final List<dynamic> data = (decoded is Map && decoded['data'] is List)
+          ? decoded['data'] as List<dynamic>
+          : (decoded is List ? decoded : const <dynamic>[]);
+      return data
+          .whereType<Map<String, dynamic>>()
+          .map(OpencodeSession.fromJson)
+          .where((s) => s.id.isNotEmpty)
+          .toList();
+    } catch (_) {
+      return const <OpencodeSession>[];
+    } finally {
+      if (owns) client.close();
+    }
+  }
+
+  /// Switches the model ONE opencode session talks to
+  /// (`POST /api/session/{id}/model` — the CLI's `/model` command).
+  /// [modelId] is `providerID/modelID` (the id format [listModels]
+  /// returns). Throws [OpencodeHttpException] on failure so the picker can
+  /// surface why the switch was rejected.
+  Future<void> setSessionModel({
+    required String serverUrl,
+    required String sessionId,
+    required String modelId,
+    String authToken = '',
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
+    final String base = serverUrl.trim().replaceAll(RegExp(r'/+$'), '');
+    final Uri uri = Uri.parse('$base/api/session/$sessionId/model');
+    final int slash = modelId.indexOf('/');
+    final Map<String, dynamic> body = slash <= 0
+        ? <String, dynamic>{
+            'model': <String, dynamic>{'id': modelId, 'providerID': 'opencode'},
+          }
+        : <String, dynamic>{
+            'model': <String, dynamic>{
+              'providerID': modelId.substring(0, slash),
+              'id': modelId.substring(slash + 1),
+            },
+          };
+    final http.Client client = _client();
+    final bool owns = _injected == null;
+    try {
+      final http.Response res = await client
+          .post(
+            uri,
+            headers: <String, String>{
+              ..._headers(authToken),
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode(body),
+          )
+          .timeout(timeout);
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        throw OpencodeHttpException(
+          'Could not switch model to $modelId: ${_truncate(res.body, 300)}',
+          statusCode: res.statusCode,
+        );
+      }
+    } catch (e) {
+      if (e is OpencodeHttpException) rethrow;
+      throw OpencodeHttpException(
+        'Could not reach opencode server to switch model: $e',
+      );
     } finally {
       if (owns) client.close();
     }
@@ -366,6 +511,9 @@ class OpencodeClient {
     final Uri uri = Uri.parse('$base/chat/completions');
     final Map<String, dynamic> body = <String, dynamic>{
       if (config.model.isNotEmpty) 'model': config.model,
+      // v1.0.8: pin the turn to the chat's opencode session so history
+      // persists across turns (CLI semantics). Empty = one-shot session.
+      if (config.sessionId.isNotEmpty) 'sessionID': config.sessionId,
       'messages': messages,
       'stream': true,
       if (tools != null && tools.isNotEmpty) 'tools': tools,
@@ -487,6 +635,7 @@ class OpencodeClient {
               content: message['content']?.toString() ?? '',
               toolCalls: _parseFullToolCalls(message['tool_calls']),
               usage: TokenUsage.fromJson(decoded['usage']),
+              sessionId: decoded['sessionID']?.toString() ?? '',
             );
           }
         }
@@ -510,6 +659,10 @@ class OpencodeClient {
     var lineBuffer = '';
     var done = false;
     var aborted = false;
+    // v1.0.8: the embedded adapter pins each chat to one opencode session
+    // and announces it in the stream's first chunk (delta.sessionID). Kept
+    // on the returned turn so the caller can persist it on the chat.
+    var sessionId = '';
 
     try {
       await for (final chunk in stream.transform(utf8.decoder)) {
@@ -548,6 +701,10 @@ class OpencodeClient {
           if (choices is! List || choices.isEmpty) continue;
           final delta = choices.first['delta'];
           if (delta is! Map<String, dynamic>) continue;
+          final Object? pinnedSession = delta['sessionID'];
+          if (pinnedSession is String && pinnedSession.isNotEmpty) {
+            sessionId = pinnedSession;
+          }
           final Object? text = delta['content'];
           if (text is String && text.isNotEmpty) {
             content.write(text);
@@ -587,7 +744,7 @@ class OpencodeClient {
       // Dropped socket mid-stream: keep usable partial text, never
       // half-received tool calls (their JSON would be truncated).
       if (tools.isEmpty && content.isNotEmpty) {
-        return AssistantTurn(content: content.toString());
+        return AssistantTurn(content: content.toString(), sessionId: sessionId);
       }
       throw LlmException('Connection lost while streaming: $e');
     }
@@ -598,6 +755,7 @@ class OpencodeClient {
     return AssistantTurn(
       content: content.toString(),
       usage: usage,
+      sessionId: sessionId,
       toolCalls: <ToolCallRequest>[
         for (final entry in ordered)
           if (entry.value.name != null) entry.value.toRequest(),
